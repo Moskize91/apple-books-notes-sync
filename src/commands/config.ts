@@ -15,6 +15,23 @@ import type { CliConfig } from "../lib/types";
 type ConfigKey = "output.dir" | "output.managedDirName" | "pdf.enabled" | "pdf.renderer";
 
 const CONFIG_KEYS: ConfigKey[] = ["output.dir", "output.managedDirName", "pdf.enabled", "pdf.renderer"];
+const CONFIG_KEY_HELP = `
+Config keys:
+  output.dir
+    Required. Existing Obsidian vault root containing .obsidian/.
+
+  output.managedDirName
+    Optional. Managed output folder name inside output.dir.
+    Default: Apple Books Notes
+
+  pdf.enabled
+    Optional. true or false.
+    Default: true
+
+  pdf.renderer
+    Optional. auto, swift, mutool, or poppler.
+    Default: auto
+`;
 
 function isConfigKey(value: string): value is ConfigKey {
   return (CONFIG_KEYS as string[]).includes(value);
@@ -108,7 +125,67 @@ async function runConfigAction(action: () => Promise<void>): Promise<void> {
 }
 
 export function registerConfigCommand(program: Command): void {
-  const command = program.command("config").description("Manage CLI configuration");
+  const command = program
+    .command("config")
+    .description("Manage CLI configuration")
+    .addHelpCommand(false)
+    .showHelpAfterError("(run `absync config --help` for usage)")
+    .addHelpText(
+      "after",
+      `
+Config file:
+  ~/Library/Application Support/apple-books-notes-sync/config.json
+
+Keys:
+  output.dir
+    Required. Absolute or ~/ path to an existing Obsidian vault root.
+    The folder must contain .obsidian/.
+
+  output.managedDirName
+    Optional. Name of the managed folder created inside output.dir.
+    Default: Apple Books Notes
+    Sync output: <output.dir>/<output.managedDirName>
+
+  pdf.enabled
+    Optional. true or false.
+    Default: true
+    Enables PDF note rendering support.
+
+  pdf.renderer
+    Optional. auto, swift, mutool, or poppler.
+    Default: auto
+    auto prefers available external renderers when possible.
+
+Subcommands:
+  absync config
+    Print effective config values.
+
+  absync config path
+    Print the config file path.
+
+  absync config list
+    Print effective config values.
+
+  absync config get <key>
+    Print one effective config value.
+
+  absync config set <key> <value>
+    Set and validate one config value.
+
+  absync config unset <key>
+    Reset one config value to its default. For output.dir this unsets it.
+
+  absync config edit
+    Open the config file in $VISUAL or $EDITOR.
+
+Examples:
+  absync config set output.dir "/Users/me/Documents/MyVault"
+  absync config set output.managedDirName "Apple Books Notes"
+  absync config set pdf.enabled true
+  absync config set pdf.renderer auto
+  absync config get output.dir
+`,
+    );
 
   command
     .action(() => {
@@ -137,6 +214,16 @@ export function registerConfigCommand(program: Command): void {
     .command("get")
     .description("Print a config value")
     .argument("<key>", `config key: ${CONFIG_KEYS.join("|")}`)
+    .addHelpCommand(false)
+    .showHelpAfterError("(run `absync config get --help` for usage)")
+    .addHelpText(
+      "after",
+      `${CONFIG_KEY_HELP}
+Examples:
+  absync config get output.dir
+  absync config get pdf.renderer
+`,
+    )
     .action((key: string) => {
       void runConfigAction(async () => {
         if (!isConfigKey(key)) {
@@ -151,6 +238,22 @@ export function registerConfigCommand(program: Command): void {
     .description("Set a config value")
     .argument("<key>", `config key: ${CONFIG_KEYS.join("|")}`)
     .argument("<value>", "config value")
+    .addHelpCommand(false)
+    .showHelpAfterError("(run `absync config set --help` for usage)")
+    .addHelpText(
+      "after",
+      `${CONFIG_KEY_HELP}
+Validation:
+  Setting output.dir immediately verifies that the path exists, is a directory,
+  contains .obsidian/, and can contain the managed output folder.
+
+Examples:
+  absync config set output.dir "/Users/me/Documents/MyVault"
+  absync config set output.managedDirName "Apple Books Notes"
+  absync config set pdf.enabled true
+  absync config set pdf.renderer auto
+`,
+    )
     .action((key: string, value: string) => {
       void runConfigAction(async () => {
         if (!isConfigKey(key)) {
@@ -167,6 +270,23 @@ export function registerConfigCommand(program: Command): void {
     .command("unset")
     .description("Reset a config value to its default")
     .argument("<key>", `config key: ${CONFIG_KEYS.join("|")}`)
+    .addHelpCommand(false)
+    .showHelpAfterError("(run `absync config unset --help` for usage)")
+    .addHelpText(
+      "after",
+      `${CONFIG_KEY_HELP}
+Unset behavior:
+  output.dir
+    Removes the configured vault path. plan and sync will fail until it is set again.
+
+  output.managedDirName, pdf.enabled, pdf.renderer
+    Reset to their defaults.
+
+Examples:
+  absync config unset output.dir
+  absync config unset pdf.renderer
+`,
+    )
     .action((key: string) => {
       void runConfigAction(async () => {
         if (!isConfigKey(key)) {

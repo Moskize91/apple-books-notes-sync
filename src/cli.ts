@@ -24,7 +24,47 @@ const program = new Command();
 program
   .name("absync")
   .description("Sync Apple Books highlights and notes to local Markdown files")
-  .version(readPackageVersion());
+  .version(readPackageVersion())
+  .addHelpCommand(false)
+  .showHelpAfterError("(run `absync --help` for usage)")
+  .addHelpText(
+    "after",
+    `
+Help:
+  Use --help on any command to open the next level of documentation:
+
+    absync config --help
+    absync plan --help
+    absync sync --help
+    absync books --help
+    absync doctor --help
+
+Typical workflow:
+  1. Configure the Obsidian vault root:
+       absync config set output.dir "/path/to/ObsidianVault"
+
+  2. Check the local environment:
+       absync doctor
+
+  3. Preview pending changes:
+       absync plan
+
+  4. Sync notes:
+       absync sync
+
+Important paths:
+  Config file:
+    ~/Library/Application Support/apple-books-notes-sync/config.json
+
+  Sync output directory:
+    <output.dir>/<output.managedDirName>
+
+Rules:
+  output.dir is required. It must be an existing Obsidian vault root and contain .obsidian/.
+  absync reads Apple Books data from the local macOS Apple Books databases.
+  absync writes only inside the managed output directory under the configured vault.
+`,
+  );
 
 registerConfigCommand(program);
 registerPlanCommand(program);

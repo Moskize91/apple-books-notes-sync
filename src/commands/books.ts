@@ -14,7 +14,33 @@ export function registerBooksCommand(program: Command): void {
   program
     .command("books")
     .description("List books available from Apple Books")
-    .option("--json", "print JSON output")
+    .addHelpCommand(false)
+    .showHelpAfterError("(run `absync books --help` for usage)")
+    .option("--json", "print machine-readable JSON output")
+    .addHelpText(
+      "after",
+      `
+What this does:
+  Reads the local Apple Books databases and lists syncable books.
+  Syncable formats are EPUB and PDF.
+
+Output fields:
+  Title
+  Author
+  Publisher, when Apple Books EPUB metadata is available
+  Format: EPUB or PDF
+  Annotations: current Apple Books annotation count
+
+Notes:
+  This command does not require absync config.
+  This command does not write files.
+  Use absync plan to see which listed books need synchronization.
+
+Examples:
+  absync books
+  absync books --json
+`,
+    )
     .action((options: ListBooksOptions) => {
       void (async () => {
         const paths = await resolveIbooksPaths();

@@ -7,6 +7,42 @@ export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
     .description("Run basic environment checks")
+    .addHelpCommand(false)
+    .showHelpAfterError("(run `absync doctor --help` for usage)")
+    .addHelpText(
+      "after",
+      `
+What this checks:
+  macOS platform
+  sqlite3 availability
+  Apple Books database readability
+  optional EPUB metadata cache readability
+  Apple Books query health
+  config validity
+  output directory writability
+  PDF renderer availability and selected renderer
+  CPU architecture and Node.js version
+
+Exit code:
+  0 when all required checks pass.
+  1 when any required check fails.
+
+Optional renderer checks:
+  mutool and pdftocairo are optional. Missing optional renderers are reported
+  with install hints and do not fail the command by themselves.
+
+Typical fixes:
+  Configure the Obsidian vault:
+    absync config set output.dir "/path/to/ObsidianVault"
+
+  Install optional PDF renderers:
+    brew install mupdf-tools
+    brew install poppler
+
+Examples:
+  absync doctor
+`,
+    )
     .action(() => {
       void (async () => {
         const paths = await resolveIbooksPaths();
