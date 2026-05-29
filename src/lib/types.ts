@@ -16,7 +16,7 @@ export type Rect = {
 };
 
 export type CliConfig = {
-  outputDir: string;
+  outputDir: string | null;
   managedDirName: string;
   pdfBetaEnabled: boolean;
   pdfRenderBackend: PdfRenderBackend;

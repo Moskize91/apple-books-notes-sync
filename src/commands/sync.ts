@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { configExists, readConfig } from "../lib/config";
+import { loadValidatedConfig } from "../lib/config";
 import { resolveIbooksPaths } from "../lib/ibooks-paths";
 import { runSync } from "../lib/sync";
 
@@ -12,18 +12,53 @@ export function registerSyncCommand(program: Command): void {
   program
     .command("sync")
     .description("Run note synchronization")
+    .addHelpCommand(false)
+    .showHelpAfterError("(run `absync sync --help` for usage)")
     .option("--dry-run", "preview changes without writing files")
-    .option("--book <keyword>", "sync only books matching keyword/title/asset id")
+    .option("--book <keyword>", "sync only books matching keyword, title, author, or asset id")
+    .addHelpText(
+      "after",
+      `
+What this does:
+  Runs the same planning phase as absync plan, then writes changed Markdown files
+  and removes stale managed output when appropriate.
+
+Prerequisites:
+  output.dir must be configured and valid:
+    absync config set output.dir "/path/to/ObsidianVault"
+
+Output layout:
+  <output.dir>/<output.managedDirName>/
+    index.md
+    books/
+      <book>.md
+    assets/
+      pdf/
+        <asset-id>/
+
+Write rules:
+  absync writes inside <output.dir>/<output.managedDirName>.
+  A full sync may remove stale files that were previously managed by absync.
+  A filtered sync with --book updates matching books only and does not process removals.
+
+PDF rendering:
+  Controlled by:
+    absync config set pdf.enabled true|false
+    absync config set pdf.renderer auto|swift|mutool|poppler
+
+Recommended flow:
+  absync plan
+  absync sync
+
+Examples:
+  absync sync
+  absync sync --dry-run
+  absync sync --book "Newton"
+`,
+    )
     .action((options: SyncOptions) => {
       void (async () => {
-        const hasConfig = await configExists();
-        if (!hasConfig) {
-          console.error("Config not found. Run `absync init` first.");
-          process.exitCode = 1;
-          return;
-        }
-
-        const config = await readConfig();
+        const config = await loadValidatedConfig();
         const paths = await resolveIbooksPaths();
         const syncOptions: { dryRun: boolean; bookFilter?: string } = {
           dryRun: Boolean(options.dryRun),

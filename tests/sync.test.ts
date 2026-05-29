@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldForcePdfResync } from "../src/lib/sync";
+import { getSyncPlanRegenerateReason, shouldForcePdfResync } from "../src/lib/sync";
 import type { SyncAssetState } from "../src/lib/types";
 
 function buildAsset(assetId: string): SyncAssetState {
@@ -31,4 +31,52 @@ test("shouldForcePdfResync returns false when assets root exists", () => {
 
 test("shouldForcePdfResync returns false when there is no prior sync state", () => {
   assert.equal(shouldForcePdfResync({}, false), false);
+});
+
+test("getSyncPlanRegenerateReason explains why an asset needs sync", () => {
+  const previous: SyncAssetState = {
+    assetId: "asset-1",
+    title: "Book 1",
+    format: "EPUB",
+    hash: "EPUB|mod:1|schema:31",
+    lastSyncedAt: "2026-02-28T00:00:00.000Z",
+    bookFileRelativePath: "books/book-1.md",
+    pdfAssetDirRelativePath: null,
+  };
+
+  assert.equal(
+    getSyncPlanRegenerateReason(
+      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      undefined,
+    ),
+    "new",
+  );
+  assert.equal(
+    getSyncPlanRegenerateReason(
+      { format: "PDF", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      previous,
+    ),
+    "format-changed",
+  );
+  assert.equal(
+    getSyncPlanRegenerateReason(
+      { format: "EPUB", hash: "EPUB|mod:2|schema:31", bookFileRelativePath: "books/book-1.md" },
+      previous,
+    ),
+    "content-changed",
+  );
+  assert.equal(
+    getSyncPlanRegenerateReason(
+      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-renamed.md" },
+      previous,
+    ),
+    "output-path-changed",
+  );
+  assert.equal(
+    getSyncPlanRegenerateReason(
+      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      previous,
+    ),
+    null,
+  );
 });
