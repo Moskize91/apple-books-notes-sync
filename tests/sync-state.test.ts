@@ -17,7 +17,7 @@ test("buildBookSyncHash for PDF includes annotation and file stamp", () => {
 });
 
 test("readSyncState returns empty state when file is missing", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ibooks-sync-state-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "apple-books-sync-state-"));
   try {
     const state = await readSyncState(tempDir);
     assert.equal(state.version, 1);
@@ -28,7 +28,7 @@ test("readSyncState returns empty state when file is missing", async () => {
 });
 
 test("writeSyncState persists assets", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ibooks-sync-state-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "apple-books-sync-state-"));
   try {
     const assets: Record<string, SyncAssetState> = {
       "asset-1": {

@@ -32,7 +32,7 @@ test("renderIndexMarkdown includes key fields", () => {
     },
   );
   assert.match(output, /^---\n/m);
-  assert.match(output, /title: "iBooks Notes Sync Index"/);
+  assert.match(output, /title: "Apple Books Notes Sync Index"/);
   assert.match(output, /generated_at: "2026-02-01 00:00:00"/);
   assert.match(output, /book_count: 1/);
   assert.match(output, /\| 书名 \| 作者 \| 格式 \|/);

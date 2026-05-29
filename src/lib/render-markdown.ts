@@ -56,7 +56,7 @@ export function renderIndexMarkdown(
     });
 
   pushFrontmatter(lines, [
-    ["title", "iBooks Notes Sync Index"],
+    ["title", "Apple Books Notes Sync Index"],
     ["generated_at", fmtDate(generatedAt)],
     ["book_count", rows.length],
   ]);

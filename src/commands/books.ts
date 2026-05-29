@@ -10,10 +10,11 @@ function pad(input: string, width: number): string {
   return input.length >= width ? input : `${input}${" ".repeat(width - input.length)}`;
 }
 
-export function registerListBooksCommand(program: Command): void {
+export function registerBooksCommand(program: Command): void {
   program
-    .command("list-books")
-    .description("List books available from iBooks data source")
+    .command("books")
+    .alias("list-books")
+    .description("List books available from Apple Books")
     .option("--json", "print JSON output")
     .action((options: ListBooksOptions) => {
       void (async () => {
@@ -56,7 +57,7 @@ export function registerListBooksCommand(program: Command): void {
         if (error instanceof Error) {
           console.error(error.message);
         } else {
-          console.error("list-books failed");
+          console.error("books failed");
         }
         process.exitCode = 1;
       });

@@ -4,7 +4,9 @@ import {
   configExists,
   getConfigPath,
   getDefaultConfig,
+  getLegacyConfigPath,
   isPdfRenderBackend,
+  migrateLegacyConfigIfNeeded,
   parsePdfRenderBackend,
   writeConfig,
 } from "../lib/config";
@@ -36,6 +38,11 @@ export function registerInitCommand(program: Command): void {
           console.error("Invalid --pdf-renderer value. Expected one of: auto|swift|mutool|poppler");
           process.exitCode = 1;
           return;
+        }
+
+        const migrated = await migrateLegacyConfigIfNeeded();
+        if (migrated) {
+          console.log(`Migrated config: ${getLegacyConfigPath()} -> ${getConfigPath()}`);
         }
 
         const exists = await configExists();

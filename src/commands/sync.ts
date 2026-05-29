@@ -18,7 +18,7 @@ export function registerSyncCommand(program: Command): void {
       void (async () => {
         const hasConfig = await configExists();
         if (!hasConfig) {
-          console.error("Config not found. Run `ibooks-notes-sync init` first.");
+          console.error("Config not found. Run `absync init` first.");
           process.exitCode = 1;
           return;
         }
