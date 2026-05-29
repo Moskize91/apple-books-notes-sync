@@ -6,6 +6,7 @@ import path from "node:path";
 import { registerBooksCommand } from "./commands/books";
 import { registerConfigCommand } from "./commands/config";
 import { registerDoctorCommand } from "./commands/doctor";
+import { registerPlanCommand } from "./commands/plan";
 import { registerSyncCommand } from "./commands/sync";
 
 function readPackageVersion(): string {
@@ -26,6 +27,7 @@ program
   .version(readPackageVersion());
 
 registerConfigCommand(program);
+registerPlanCommand(program);
 registerSyncCommand(program);
 registerBooksCommand(program);
 registerDoctorCommand(program);

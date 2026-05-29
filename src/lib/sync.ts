@@ -73,6 +73,71 @@ type BookFingerprint = {
   shouldHaveOutput: boolean;
 };
 
+export type SyncPlanReason =
+  | "new"
+  | "unchanged"
+  | "format-changed"
+  | "content-changed"
+  | "output-path-changed"
+  | "legacy-output"
+  | "missing-output"
+  | "pdf-assets-missing"
+  | "removed";
+
+export type SyncPlanRegenerateReason =
+  | "new"
+  | "format-changed"
+  | "content-changed"
+  | "output-path-changed";
+
+export type SyncPlanComparableAsset = {
+  format: SyncableBookFormat;
+  hash: string;
+  bookFileRelativePath: string | null;
+};
+
+export type SyncPlanBook = {
+  assetId: string;
+  title: string;
+  author: string | null;
+  format: SyncableBookFormat;
+  annotationCount: number;
+  bookFileRelativePath: string | null;
+  reason: SyncPlanReason;
+};
+
+export type SyncPlanRemovedBook = {
+  assetId: string;
+  title: string;
+  format: SyncableBookFormat;
+  bookFileRelativePath: string | null;
+  reason: "removed";
+};
+
+export type SyncPlan = {
+  outputDir: string;
+  booksDirName: string;
+  isFullSync: boolean;
+  allBooks: Array<Book & { format: SyncableBookFormat }>;
+  selectedBooks: Array<Book & { format: SyncableBookFormat }>;
+  bookSnapshots: BookSyncSnapshot[];
+  changedSnapshots: BookSyncSnapshot[];
+  previousStateAssets: Record<string, SyncAssetState>;
+  nextStateAssets: Record<string, SyncAssetState>;
+  bookFileRelativePathByAssetId: Map<string, string | null>;
+  removedAssetIds: string[];
+  changed: SyncPlanBook[];
+  unchanged: SyncPlanBook[];
+  removed: SyncPlanRemovedBook[];
+  forcePdfResync: boolean;
+  stats: {
+    totalBooks: number;
+    changedBooks: number;
+    unchangedBooks: number;
+    removedBooks: number;
+  };
+};
+
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
 const OUTPUT_SCHEMA_VERSION = 31;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
@@ -149,24 +214,27 @@ function toSyncStateAsset(
   };
 }
 
-function shouldRegenerateBook(snapshot: BookSyncSnapshot, previous: SyncAssetState | undefined): boolean {
+export function getSyncPlanRegenerateReason(
+  current: SyncPlanComparableAsset,
+  previous: SyncAssetState | undefined,
+): SyncPlanRegenerateReason | null {
   if (!previous) {
-    return true;
+    return "new";
   }
 
-  if (previous.format !== snapshot.book.format) {
-    return true;
+  if (previous.format !== current.format) {
+    return "format-changed";
   }
 
-  if (previous.hash !== snapshot.hash) {
-    return true;
+  if (previous.hash !== current.hash) {
+    return "content-changed";
   }
 
-  if (previous.bookFileRelativePath !== snapshot.bookFileRelativePath) {
-    return true;
+  if (previous.bookFileRelativePath !== current.bookFileRelativePath) {
+    return "output-path-changed";
   }
 
-  return false;
+  return null;
 }
 
 function shouldForcePdfResync(previousStateAssets: Record<string, SyncAssetState>, assetsRootExists: boolean): boolean {
@@ -375,7 +443,33 @@ async function buildBookFingerprint(
   };
 }
 
-export async function runSync(config: CliConfig, paths: IBooksPaths, options: SyncOptions): Promise<SyncResult> {
+function toPlanBook(snapshot: BookSyncSnapshot, reason: SyncPlanReason): SyncPlanBook {
+  return {
+    assetId: snapshot.book.assetId,
+    title: snapshot.book.title,
+    author: snapshot.book.author,
+    format: snapshot.book.format,
+    annotationCount: snapshot.book.annotationCount,
+    bookFileRelativePath: snapshot.bookFileRelativePath,
+    reason,
+  };
+}
+
+function toRemovedPlanBook(asset: SyncAssetState): SyncPlanRemovedBook {
+  return {
+    assetId: asset.assetId,
+    title: asset.title,
+    format: asset.format,
+    bookFileRelativePath: asset.bookFileRelativePath,
+    reason: "removed",
+  };
+}
+
+export async function buildSyncPlan(
+  config: CliConfig,
+  paths: IBooksPaths,
+  options: { bookFilter?: string | undefined },
+): Promise<SyncPlan> {
   if (!config.outputDir) {
     throw new Error("Missing required config: output.dir");
   }
@@ -386,18 +480,6 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
 
   const outputDir = path.resolve(config.outputDir, config.managedDirName);
   const booksDirName = "books";
-  const stagingRoot = path.join(outputDir, ".staging", `${Date.now()}-${process.pid}`);
-  const syncStartedAt = new Date().toISOString();
-
-  const stats: SyncStats = {
-    totalBooks: books.length,
-    successBooks: 0,
-    failedBooks: 0,
-    skippedBooks: 0,
-    generatedFiles: 0,
-  };
-
-  const errors: Array<{ title: string; reason: string }> = [];
   const previousState = await readSyncState(outputDir);
   const nextStateAssets: Record<string, SyncAssetState> = { ...previousState.assets };
   for (const asset of Object.values(nextStateAssets)) {
@@ -469,39 +551,116 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
 
   const assetsRootExists = await pathExists(path.join(outputDir, "assets"));
   const forcePdfResync = shouldForcePdfResync(previousState.assets, assetsRootExists);
-  if (forcePdfResync) {
-    log("info", "assets directory missing; all PDF books will be re-synced.");
-  }
 
   const changedSnapshots: BookSyncSnapshot[] = [];
+  const changed: SyncPlanBook[] = [];
+  const unchanged: SyncPlanBook[] = [];
   for (const snapshot of bookSnapshots) {
     if (forcePdfResync && snapshot.book.format === "PDF") {
       changedSnapshots.push(snapshot);
+      changed.push(toPlanBook(snapshot, "pdf-assets-missing"));
       continue;
     }
 
     const previous = previousState.assets[snapshot.book.assetId];
-    if (shouldRegenerateBook(snapshot, previous)) {
+    const regenerateReason = getSyncPlanRegenerateReason(
+      {
+        format: snapshot.book.format,
+        hash: snapshot.hash,
+        bookFileRelativePath: snapshot.bookFileRelativePath,
+      },
+      previous,
+    );
+    if (regenerateReason) {
       changedSnapshots.push(snapshot);
+      changed.push(toPlanBook(snapshot, regenerateReason));
       continue;
     }
 
     if (snapshot.book.format === "PDF" && (await hasLegacyPdfFallbackMarker(outputDir, previous))) {
       changedSnapshots.push(snapshot);
+      changed.push(toPlanBook(snapshot, "legacy-output"));
       continue;
     }
 
     if (snapshot.book.format === "EPUB" && (await hasLegacyEpubInternalChapterHeading(outputDir, previous))) {
       changedSnapshots.push(snapshot);
+      changed.push(toPlanBook(snapshot, "legacy-output"));
       continue;
     }
 
     if (await hasMissingExpectedBookFile(outputDir, previous)) {
       changedSnapshots.push(snapshot);
+      changed.push(toPlanBook(snapshot, "missing-output"));
       continue;
     }
 
-    stats.skippedBooks += 1;
+    unchanged.push(toPlanBook(snapshot, "unchanged"));
+  }
+
+  const allCurrentAssetIds = new Set(allBooks.map((book) => book.assetId));
+  const removedAssetIds = isFullSync
+    ? Object.keys(previousState.assets).filter((assetId) => {
+        return !allCurrentAssetIds.has(assetId);
+      })
+    : [];
+  const removed = removedAssetIds
+    .map((assetId) => previousState.assets[assetId])
+    .filter((asset): asset is SyncAssetState => Boolean(asset))
+    .map(toRemovedPlanBook);
+
+  return {
+    outputDir,
+    booksDirName,
+    isFullSync,
+    allBooks,
+    selectedBooks: books,
+    bookSnapshots,
+    changedSnapshots,
+    previousStateAssets: previousState.assets,
+    nextStateAssets,
+    bookFileRelativePathByAssetId,
+    removedAssetIds,
+    changed,
+    unchanged,
+    removed,
+    forcePdfResync,
+    stats: {
+      totalBooks: books.length,
+      changedBooks: changed.length,
+      unchangedBooks: unchanged.length,
+      removedBooks: removed.length,
+    },
+  };
+}
+
+export async function runSync(config: CliConfig, paths: IBooksPaths, options: SyncOptions): Promise<SyncResult> {
+  const plan = await buildSyncPlan(config, paths, { bookFilter: options.bookFilter });
+  const {
+    outputDir,
+    booksDirName,
+    isFullSync,
+    allBooks,
+    changedSnapshots,
+    previousStateAssets,
+    nextStateAssets,
+    removedAssetIds,
+  } = plan;
+  const stagingRoot = path.join(outputDir, ".staging", `${Date.now()}-${process.pid}`);
+  const syncStartedAt = new Date().toISOString();
+
+  const stats: SyncStats = {
+    totalBooks: plan.stats.totalBooks,
+    successBooks: 0,
+    failedBooks: 0,
+    skippedBooks: plan.stats.unchangedBooks,
+    generatedFiles: 0,
+  };
+
+  const errors: Array<{ title: string; reason: string }> = [];
+
+  if (plan.forcePdfResync) {
+    log("info", "assets directory missing; all PDF books will be re-synced.");
   }
 
   const hasChangedPdfSnapshots = changedSnapshots.some((snapshot) => snapshot.book.format === "PDF");
@@ -518,16 +677,9 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
     log("info", `pdf renderer: configured=${config.pdfRenderBackend}, active=${activePdfRendererDetail}`);
   }
 
-  const allCurrentAssetIds = new Set(allBooks.map((book) => book.assetId));
-  const removedAssetIds = isFullSync
-    ? Object.keys(previousState.assets).filter((assetId) => {
-        return !allCurrentAssetIds.has(assetId);
-      })
-    : [];
-
   log(
     "info",
-    `sync plan: changed=${changedSnapshots.length}, unchanged=${stats.skippedBooks}, removed=${removedAssetIds.length}`,
+    `sync plan: changed=${plan.stats.changedBooks}, unchanged=${plan.stats.unchangedBooks}, removed=${plan.stats.removedBooks}`,
   );
 
   const changedEpubAssetIds = new Set(
@@ -570,7 +722,7 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
       const action = options.dryRun ? "dry-run preparing" : "syncing";
       log("info", `${action} (${progress}) [${snapshot.book.format}] ${snapshot.book.title}`);
 
-      const previousAssetState = previousState.assets[snapshot.book.assetId];
+      const previousAssetState = previousStateAssets[snapshot.book.assetId];
       try {
         if (snapshot.bookFileRelativePath === null) {
           if (!options.dryRun) {
@@ -682,7 +834,7 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
 
     if (isFullSync) {
       for (const removedAssetId of removedAssetIds) {
-        const previousAsset = previousState.assets[removedAssetId];
+        const previousAsset = previousStateAssets[removedAssetId];
         if (!previousAsset) {
           continue;
         }

@@ -13,7 +13,6 @@ function pad(input: string, width: number): string {
 export function registerBooksCommand(program: Command): void {
   program
     .command("books")
-    .alias("list-books")
     .description("List books available from Apple Books")
     .option("--json", "print JSON output")
     .action((options: ListBooksOptions) => {
