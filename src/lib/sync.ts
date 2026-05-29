@@ -376,6 +376,10 @@ async function buildBookFingerprint(
 }
 
 export async function runSync(config: CliConfig, paths: IBooksPaths, options: SyncOptions): Promise<SyncResult> {
+  if (!config.outputDir) {
+    throw new Error("Missing required config: output.dir");
+  }
+
   const allBooks = readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath).filter(isSyncableBook);
   const books = filterBooks(allBooks, options.bookFilter);
   const isFullSync = !options.bookFilter;

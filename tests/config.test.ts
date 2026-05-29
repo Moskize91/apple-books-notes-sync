@@ -34,9 +34,9 @@ test("getConfigPath uses macOS Application Support", async () => {
 });
 
 test("readConfigOrDefault returns defaults when config is missing", async () => {
-  await withTempHome(async (config, homeDir) => {
+  await withTempHome(async (config) => {
     const loaded = await config.readConfigOrDefault();
-    assert.equal(loaded.outputDir, path.join(homeDir, "Documents"));
+    assert.equal(loaded.outputDir, null);
     assert.equal(loaded.managedDirName, "Apple Books Notes");
     assert.equal(loaded.pdfBetaEnabled, true);
     assert.equal(loaded.pdfRenderBackend, "auto");
@@ -71,5 +71,57 @@ test("normalizeConfig expands home and falls back for invalid pdf renderer", asy
     assert.equal(normalized.managedDirName, "Apple Books Notes");
     assert.equal(normalized.pdfBetaEnabled, true);
     assert.equal(normalized.pdfRenderBackend, "auto");
+  });
+});
+
+test("loadValidatedConfig reports missing output dir with setup guidance", async () => {
+  await withTempHome(async (config) => {
+    await assert.rejects(
+      () => config.loadValidatedConfig(),
+      (error: unknown) => {
+        assert.ok(error instanceof config.ConfigValidationError);
+        assert.match(error.message, /Missing required config: output\.dir/);
+        assert.match(error.message, /absync config set output\.dir/);
+        return true;
+      },
+    );
+  });
+});
+
+test("validateConfig requires output dir to be an Obsidian vault", async () => {
+  await withTempHome(async (config, homeDir) => {
+    const notVault = path.join(homeDir, "NotVault");
+    await fs.mkdir(notVault, { recursive: true });
+
+    await assert.rejects(
+      () =>
+        config.validateConfig({
+          outputDir: notVault,
+          managedDirName: "Apple Books Notes",
+          pdfBetaEnabled: true,
+          pdfRenderBackend: "auto",
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof config.ConfigValidationError);
+        assert.match(error.message, /not an Obsidian vault/);
+        assert.match(error.message, /\.obsidian\//);
+        assert.match(error.message, /absync config set output\.dir/);
+        return true;
+      },
+    );
+  });
+});
+
+test("validateConfig accepts an existing Obsidian vault", async () => {
+  await withTempHome(async (config, homeDir) => {
+    const vault = path.join(homeDir, "Vault");
+    await fs.mkdir(path.join(vault, ".obsidian"), { recursive: true });
+
+    await config.validateConfig({
+      outputDir: vault,
+      managedDirName: "Apple Books Notes",
+      pdfBetaEnabled: true,
+      pdfRenderBackend: "auto",
+    });
   });
 });

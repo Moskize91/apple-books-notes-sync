@@ -4,6 +4,7 @@ import path from "node:path";
 import { readBooks } from "./ibooks-data";
 import { detectPdfRendererAvailability, resolvePdfRenderBackend } from "./pdf";
 import { sqliteVersion } from "./sqlite";
+import type { ConfigValidationError } from "./config";
 import type { CliConfig, IBooksPaths } from "./types";
 
 export type DoctorCheck = {
@@ -43,7 +44,11 @@ async function canWriteDir(dirPath: string): Promise<boolean> {
   }
 }
 
-export async function runDoctor(paths: IBooksPaths, config: CliConfig | null): Promise<DoctorReport> {
+export async function runDoctor(
+  paths: IBooksPaths,
+  config: CliConfig | null,
+  configError: ConfigValidationError | null = null,
+): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
 
   checks.push({
@@ -137,8 +142,15 @@ export async function runDoctor(paths: IBooksPaths, config: CliConfig | null): P
   }
 
   if (config) {
+    if (!config.outputDir) {
+      checks.push({
+        name: "config",
+        ok: false,
+        detail: "Missing required config: output.dir Run: absync config set output.dir <path-to-obsidian-vault>",
+      });
+    } else {
     const managedOutput = path.join(config.outputDir, config.managedDirName);
-    const writable = await canWriteDir(path.dirname(managedOutput));
+    const writable = await canWriteDir(managedOutput);
     checks.push({
       name: "output directory writable",
       ok: writable,
@@ -159,11 +171,18 @@ export async function runDoctor(paths: IBooksPaths, config: CliConfig | null): P
         detail: error instanceof Error ? error.message : "invalid renderer configuration",
       });
     }
+    }
+  } else if (configError) {
+    checks.push({
+      name: "config",
+      ok: false,
+      detail: configError.message.replace(/\n/g, " "),
+    });
   } else {
     checks.push({
-      name: "output directory writable",
+      name: "config",
       ok: false,
-      detail: "config not initialized (run: absync config set output.dir <path>)",
+      detail: "config unavailable",
     });
   }
 

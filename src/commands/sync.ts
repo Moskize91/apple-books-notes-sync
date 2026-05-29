@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { configExists, readConfig } from "../lib/config";
+import { loadValidatedConfig } from "../lib/config";
 import { resolveIbooksPaths } from "../lib/ibooks-paths";
 import { runSync } from "../lib/sync";
 
@@ -16,14 +16,7 @@ export function registerSyncCommand(program: Command): void {
     .option("--book <keyword>", "sync only books matching keyword/title/asset id")
     .action((options: SyncOptions) => {
       void (async () => {
-        const hasConfig = await configExists();
-        if (!hasConfig) {
-          console.error("Config not found. Run `absync config set output.dir <path>` first.");
-          process.exitCode = 1;
-          return;
-        }
-
-        const config = await readConfig();
+        const config = await loadValidatedConfig();
         const paths = await resolveIbooksPaths();
         const syncOptions: { dryRun: boolean; bookFilter?: string } = {
           dryRun: Boolean(options.dryRun),

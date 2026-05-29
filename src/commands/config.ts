@@ -6,6 +6,7 @@ import {
   getDefaultConfig,
   isPdfRenderBackend,
   readConfigOrDefault,
+  validateConfigValue,
   writeConfig,
 } from "../lib/config";
 import { expandHome } from "../lib/path-utils";
@@ -36,7 +37,7 @@ function parseBoolean(value: string): boolean {
 
 function toPublicConfig(config: CliConfig): Record<ConfigKey, string> {
   return {
-    "output.dir": config.outputDir,
+    "output.dir": config.outputDir ?? "<unset>",
     "output.managedDirName": config.managedDirName,
     "pdf.enabled": String(config.pdfBetaEnabled),
     "pdf.renderer": config.pdfRenderBackend,
@@ -72,7 +73,7 @@ function setConfigValue(config: CliConfig, key: ConfigKey, value: string): CliCo
 function unsetConfigValue(config: CliConfig, key: ConfigKey): CliConfig {
   const defaults = getDefaultConfig();
   if (key === "output.dir") {
-    return { ...config, outputDir: defaults.outputDir };
+    return { ...config, outputDir: null };
   }
   if (key === "output.managedDirName") {
     return { ...config, managedDirName: defaults.managedDirName };
@@ -156,6 +157,7 @@ export function registerConfigCommand(program: Command): void {
           throw keyError(key);
         }
         const nextConfig = setConfigValue(await readConfigOrDefault(), key, value);
+        await validateConfigValue(key, nextConfig);
         await writeConfig(nextConfig);
         console.log(`${key}=${getConfigValue(nextConfig, key)}`);
       });
