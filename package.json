@@ -1,10 +1,10 @@
 {
-  "name": "ibooks-notes-sync-cli",
+  "name": "apple-books-notes-sync",
   "version": "0.1.0",
-  "description": "CLI for syncing iBooks notes",
+  "description": "Sync Apple Books highlights and notes to local Markdown files.",
   "main": "dist/cli.js",
   "bin": {
-    "ibooks-notes-sync": "dist/cli.js"
+    "absync": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -12,23 +12,45 @@
   ],
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "dev:sync": "tsx src/cli.ts init --force --output-dir . --managed-dir-name sync && tsx src/cli.ts sync",
+    "dev:sync:dry": "tsx src/cli.ts init --force --output-dir . --managed-dir-name sync && tsx src/cli.ts sync --dry-run",
     "build": "tsup",
     "start": "node dist/cli.js",
-    "sync": "tsx src/cli.ts init --force --output-dir . --managed-dir-name sync && tsx src/cli.ts sync",
-    "sync:dry": "tsx src/cli.ts init --force --output-dir . --managed-dir-name sync && tsx src/cli.ts sync --dry-run",
     "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "check": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "check": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "install:local": "npm run build && npm install -g .",
+    "pack:dry": "npm pack --dry-run",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "apple-books",
+    "books",
+    "highlights",
+    "notes",
+    "markdown",
+    "obsidian",
+    "cli"
+  ],
+  "author": "Moskize91",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moskize91/apple-books-notes-sync.git"
+  },
+  "bugs": {
+    "url": "https://github.com/moskize91/apple-books-notes-sync/issues"
+  },
+  "homepage": "https://github.com/moskize91/apple-books-notes-sync",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "commonjs",
-  "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=20.16.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

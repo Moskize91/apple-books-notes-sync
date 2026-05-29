@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import type { PdfAnnotation, PdfPageAnnotations, PdfRenderBackend, Rect } from "./types";
@@ -517,7 +518,11 @@ function escapeXml(input: string): string {
 }
 
 function getRenderScriptPath(): string {
-  return path.resolve(__dirname, "../../tools/render_pdf_page.swift");
+  const candidates = [
+    path.resolve(__dirname, "../tools/render_pdf_page.swift"),
+    path.resolve(__dirname, "../../tools/render_pdf_page.swift"),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
 }
 
 function isCommandAvailable(command: string): boolean {

@@ -124,13 +124,13 @@ export async function runDoctor(paths: IBooksPaths, config: CliConfig | null): P
     epubBooks = list.filter((book) => book.format === "EPUB").length;
     pdfBooks = list.filter((book) => book.format === "PDF").length;
     checks.push({
-      name: "iBooks data query",
+      name: "Apple Books data query",
       ok: true,
       detail: `books=${books}, epub=${epubBooks}, pdf=${pdfBooks}`,
     });
   } catch (error: unknown) {
     checks.push({
-      name: "iBooks data query",
+      name: "Apple Books data query",
       ok: false,
       detail: error instanceof Error ? error.message : "query failed",
     });
@@ -163,7 +163,7 @@ export async function runDoctor(paths: IBooksPaths, config: CliConfig | null): P
     checks.push({
       name: "output directory writable",
       ok: false,
-      detail: "config not initialized (run: ibooks-notes-sync init)",
+      detail: "config not initialized (run: absync init)",
     });
   }
 
