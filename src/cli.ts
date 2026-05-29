@@ -72,6 +72,11 @@ registerSyncCommand(program);
 registerBooksCommand(program);
 registerDoctorCommand(program);
 
+if (process.argv.length <= 2) {
+  program.outputHelp();
+  process.exit(0);
+}
+
 program.parseAsync(process.argv).catch((error: unknown) => {
   if (error instanceof Error) {
     console.error(error.message);

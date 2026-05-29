@@ -32,6 +32,11 @@ Optional renderer checks:
   with install hints and do not fail the command by themselves.
 
 Typical fixes:
+  If Apple Books databases are missing or unreadable:
+    open Apple Books once with the current macOS user
+    make sure HOME has not been overridden or isolated
+    run absync on macOS
+
   Configure the Obsidian vault:
     absync config set output.dir "/path/to/ObsidianVault"
 
@@ -66,7 +71,7 @@ Examples:
 
         console.log("");
         console.log(
-          `summary: books=${report.summary.books}, epub=${report.summary.epubBooks}, pdf=${report.summary.pdfBooks}`,
+          `summary: syncable=${report.summary.books}, epub=${report.summary.epubBooks}, pdf=${report.summary.pdfBooks}, unsupported=${report.summary.unsupportedBooks}`,
         );
 
         if (!report.ok) {

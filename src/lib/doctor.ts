@@ -20,6 +20,7 @@ export type DoctorReport = {
     books: number;
     epubBooks: number;
     pdfBooks: number;
+    unsupportedBooks: number;
   };
 };
 
@@ -44,6 +45,19 @@ async function canWriteDir(dirPath: string): Promise<boolean> {
   }
 }
 
+function formatAppleBooksUnavailableDetail(): string {
+  return [
+    "Apple Books databases are missing or unreadable.",
+    "Possible causes: Apple Books/iBooks is not installed or initialized,",
+    "this is not macOS, or HOME was overridden/isolated.",
+    "Expected current-user data under ~/Library/Containers/com.apple.iBooksX/.",
+  ].join(" ");
+}
+
+function isSyncableFormat(format: string): boolean {
+  return format === "EPUB" || format === "PDF";
+}
+
 export async function runDoctor(
   paths: IBooksPaths,
   config: CliConfig | null,
@@ -51,9 +65,10 @@ export async function runDoctor(
 ): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
 
+  const isMacos = process.platform === "darwin";
   checks.push({
     name: "macOS environment",
-    ok: process.platform === "darwin",
+    ok: isMacos,
     detail: `platform=${process.platform}`,
   });
 
@@ -72,15 +87,17 @@ export async function runDoctor(
     });
   }
 
+  const libraryDbReadable = await canRead(paths.libraryDbPath);
   checks.push({
     name: "BKLibrary readable",
-    ok: await canRead(paths.libraryDbPath),
+    ok: libraryDbReadable,
     detail: paths.libraryDbPath,
   });
 
+  const annotationDbReadable = await canRead(paths.annotationDbPath);
   checks.push({
     name: "AEAnnotation readable",
-    ok: await canRead(paths.annotationDbPath),
+    ok: annotationDbReadable,
     detail: paths.annotationDbPath,
   });
 
@@ -123,22 +140,32 @@ export async function runDoctor(
   let books = 0;
   let epubBooks = 0;
   let pdfBooks = 0;
-  try {
-    const list = readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath);
-    books = list.length;
-    epubBooks = list.filter((book) => book.format === "EPUB").length;
-    pdfBooks = list.filter((book) => book.format === "PDF").length;
-    checks.push({
-      name: "Apple Books data query",
-      ok: true,
-      detail: `books=${books}, epub=${epubBooks}, pdf=${pdfBooks}`,
-    });
-  } catch (error: unknown) {
+  let unsupportedBooks = 0;
+  if (!isMacos || !libraryDbReadable || !annotationDbReadable) {
     checks.push({
       name: "Apple Books data query",
       ok: false,
-      detail: error instanceof Error ? error.message : "query failed",
+      detail: formatAppleBooksUnavailableDetail(),
     });
+  } else {
+    try {
+      const list = readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath);
+      epubBooks = list.filter((book) => book.format === "EPUB").length;
+      pdfBooks = list.filter((book) => book.format === "PDF").length;
+      books = epubBooks + pdfBooks;
+      unsupportedBooks = list.filter((book) => !isSyncableFormat(book.format)).length;
+      checks.push({
+        name: "Apple Books data query",
+        ok: true,
+        detail: `syncable=${books}, epub=${epubBooks}, pdf=${pdfBooks}, unsupported=${unsupportedBooks}`,
+      });
+    } catch {
+      checks.push({
+        name: "Apple Books data query",
+        ok: false,
+        detail: formatAppleBooksUnavailableDetail(),
+      });
+    }
   }
 
   if (config) {
@@ -195,6 +222,6 @@ export async function runDoctor(
   return {
     ok: checks.every((check) => check.ok),
     checks,
-    summary: { books, epubBooks, pdfBooks },
+    summary: { books, epubBooks, pdfBooks, unsupportedBooks },
   };
 }
