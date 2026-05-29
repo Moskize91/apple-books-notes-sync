@@ -1,6 +1,12 @@
-# apple-books-notes-sync
-
-[中文说明](./README.zh-CN.md)
+<div align="center">
+  <h1>apple-books-notes-sync</h1>
+  <p>English | <a href="./README.zh-CN.md">中文</a></p>
+  <p>
+    <a href="https://www.npmjs.com/package/apple-books-notes-sync"><img alt="npm version" src="https://img.shields.io/npm/v/apple-books-notes-sync"></a>
+    <a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
+    <a href="https://nodejs.org/"><img alt="Node >=20.16.0" src="https://img.shields.io/badge/node-%3E%3D20.16.0-brightgreen"></a>
+  </p>
+</div>
 
 Sync Apple Books highlights and notes to local Markdown files for Obsidian.
 
