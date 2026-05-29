@@ -163,7 +163,7 @@ export async function runDoctor(paths: IBooksPaths, config: CliConfig | null): P
     checks.push({
       name: "output directory writable",
       ok: false,
-      detail: "config not initialized (run: absync init)",
+      detail: "config not initialized (run: absync config set output.dir <path>)",
     });
   }
 

@@ -12,8 +12,8 @@
   ],
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "dev:sync": "tsx src/cli.ts init --force --output-dir . --managed-dir-name sync && tsx src/cli.ts sync",
-    "dev:sync:dry": "tsx src/cli.ts init --force --output-dir . --managed-dir-name sync && tsx src/cli.ts sync --dry-run",
+    "dev:sync": "tsx src/cli.ts config set output.dir . && tsx src/cli.ts config set output.managedDirName sync && tsx src/cli.ts sync",
+    "dev:sync:dry": "tsx src/cli.ts config set output.dir . && tsx src/cli.ts config set output.managedDirName sync && tsx src/cli.ts sync --dry-run",
     "build": "tsup",
     "start": "node dist/cli.js",
     "test": "tsx --test tests/**/*.test.ts",

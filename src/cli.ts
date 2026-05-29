@@ -4,8 +4,8 @@ import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
 import { registerBooksCommand } from "./commands/books";
+import { registerConfigCommand } from "./commands/config";
 import { registerDoctorCommand } from "./commands/doctor";
-import { registerInitCommand } from "./commands/init";
 import { registerSyncCommand } from "./commands/sync";
 
 function readPackageVersion(): string {
@@ -25,7 +25,7 @@ program
   .description("Sync Apple Books highlights and notes to local Markdown files")
   .version(readPackageVersion());
 
-registerInitCommand(program);
+registerConfigCommand(program);
 registerSyncCommand(program);
 registerBooksCommand(program);
 registerDoctorCommand(program);
