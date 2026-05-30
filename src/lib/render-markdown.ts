@@ -238,7 +238,7 @@ export function renderEpubBookMarkdown(
   annotations: EpubAnnotation[],
   chapterTitleByKey?: Map<string, string>,
   chapterOrderByKey?: Map<string, number>,
-  coverImageRelativePath?: string | null,
+  coverImagePropertyValue?: string | null,
 ): string {
   const lines: string[] = [];
   pushFrontmatter(lines, [
@@ -248,7 +248,7 @@ export function renderEpubBookMarkdown(
     ["format", "EPUB"],
     ["annotation_count", annotations.length],
     ["最后修改时间", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
-    ["封面", coverImageRelativePath ? path.posix.join("..", coverImageRelativePath) : null],
+    ["封面", coverImagePropertyValue ?? ""],
     ["source_file", book.path],
   ]);
 
@@ -323,7 +323,7 @@ export function renderEpubBookMarkdown(
 export function renderPdfBookMarkdown(
   book: Book,
   pages: PdfRenderedPage[],
-  coverImageRelativePath?: string | null,
+  coverImagePropertyValue?: string | null,
 ): string {
   const lines: string[] = [];
   pushFrontmatter(lines, [
@@ -334,7 +334,7 @@ export function renderPdfBookMarkdown(
     ["pdf_beta", true],
     ["annotated_pages", pages.length],
     ["最后修改时间", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
-    ["封面", coverImageRelativePath ? path.posix.join("..", coverImageRelativePath) : null],
+    ["封面", coverImagePropertyValue ?? ""],
     ["source_file", book.path],
   ]);
 

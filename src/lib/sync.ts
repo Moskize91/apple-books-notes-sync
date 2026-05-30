@@ -143,7 +143,7 @@ export type SyncPlan = {
 };
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
-const OUTPUT_SCHEMA_VERSION = 32;
+const OUTPUT_SCHEMA_VERSION = 33;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 
@@ -487,13 +487,14 @@ async function buildBookFingerprint(
   const hash = `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}`;
   const shouldHaveOutput =
     book.format === "EPUB"
-      ? (epubRenderableCounts.get(book.assetId) ?? 0) > 0
+      ? (epubRenderableCounts.get(book.assetId) ?? 0) > 0 ||
+        Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath)
       : (() => {
           const previous = previousStateAssets[book.assetId];
           if (previous && previous.hash === hash) {
             return previous.bookFileRelativePath !== null;
           }
-          return (pdfFallbackCounts.get(book.assetId) ?? 0) > 0;
+          return (pdfFallbackCounts.get(book.assetId) ?? 0) > 0 || Boolean(previous?.bookFileRelativePath);
         })();
 
   return {
@@ -513,6 +514,13 @@ function toPlanBook(snapshot: BookSyncSnapshot, reason: SyncPlanReason): SyncPla
     bookFileRelativePath: snapshot.bookFileRelativePath,
     reason,
   };
+}
+
+function toObsidianWikilink(managedDirName: string, relativePath: string | null): string | null {
+  if (!relativePath) {
+    return null;
+  }
+  return `[[${path.posix.join(managedDirName, relativePath)}]]`;
 }
 
 function toRemovedPlanBook(asset: SyncAssetState): SyncPlanRemovedBook {
@@ -823,15 +831,22 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
         let epubChapterTitleByKey: Map<string, string> | undefined;
         let epubChapterOrderByKey: Map<string, number> | undefined;
         let pdfPages: PdfPageRenderItem[] = [];
+        const canPreservePreviousOutput = previousAssetState?.bookFileRelativePath
+          ? await pathExists(path.join(outputDir, previousAssetState.bookFileRelativePath))
+          : false;
 
         if (snapshot.book.format === "EPUB") {
           epubNotes = annotationsByAssetId.get(snapshot.book.assetId) ?? [];
           epubChapterTitleByKey = chapterTitleByKeyByAssetId.get(snapshot.book.assetId);
           epubChapterOrderByKey = chapterOrderByKeyByAssetId.get(snapshot.book.assetId);
           if (epubNotes.length === 0) {
-            nextBookFileRelativePath = null;
+            nextBookFileRelativePath = canPreservePreviousOutput
+              ? previousAssetState?.bookFileRelativePath ?? null
+              : null;
             nextPdfAssetDirRelativePath = null;
-            nextCoverImageRelativePath = null;
+            nextCoverImageRelativePath = canPreservePreviousOutput
+              ? previousAssetState?.coverImageRelativePath ?? null
+              : null;
           } else {
             nextBookFileRelativePath = snapshot.bookFileRelativePath;
           }
@@ -847,9 +862,15 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
             generatedPdfImageCount = pdfPages.filter((page) => page.imageRelativePath).length;
           }
           if (pdfPages.length === 0) {
-            nextBookFileRelativePath = null;
-            nextPdfAssetDirRelativePath = null;
-            nextCoverImageRelativePath = null;
+            nextBookFileRelativePath = canPreservePreviousOutput
+              ? previousAssetState?.bookFileRelativePath ?? null
+              : null;
+            nextPdfAssetDirRelativePath = canPreservePreviousOutput
+              ? previousAssetState?.pdfAssetDirRelativePath ?? null
+              : null;
+            nextCoverImageRelativePath = canPreservePreviousOutput
+              ? previousAssetState?.coverImageRelativePath ?? null
+              : null;
           } else {
             nextBookFileRelativePath = snapshot.bookFileRelativePath;
             nextPdfAssetDirRelativePath =
@@ -874,6 +895,7 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
         }
 
         if (nextBookFileRelativePath) {
+          const coverImagePropertyValue = toObsidianWikilink(config.managedDirName, nextCoverImageRelativePath);
           markdown =
             snapshot.book.format === "EPUB"
               ? renderEpubBookMarkdown(
@@ -881,18 +903,19 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
                   epubNotes,
                   epubChapterTitleByKey,
                   epubChapterOrderByKey,
-                  nextCoverImageRelativePath,
+                  coverImagePropertyValue,
                 )
-              : renderPdfBookMarkdown(snapshot.book, pdfPages, nextCoverImageRelativePath);
+              : renderPdfBookMarkdown(snapshot.book, pdfPages, coverImagePropertyValue);
         }
 
         if (!options.dryRun) {
-          if (nextBookFileRelativePath) {
+          const hasRenderableContent = epubNotes.length > 0 || pdfPages.length > 0;
+          if (nextBookFileRelativePath && hasRenderableContent) {
             const targetBookPath = path.join(outputDir, nextBookFileRelativePath);
             await writeFileAtomically(targetBookPath, markdown);
           }
 
-          if (snapshot.book.format === "PDF") {
+          if (snapshot.book.format === "PDF" && pdfPages.length > 0) {
             const currentPdfAssetDir = path.join(outputDir, path.posix.join("assets", "pdf", snapshot.book.assetId));
             if (nextPdfAssetDirRelativePath && generatedPdfImageCount > 0) {
               const targetPdfAssetDir = path.join(outputDir, nextPdfAssetDirRelativePath);
@@ -906,7 +929,7 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
             const targetCoverImagePath = path.join(outputDir, nextCoverImageRelativePath);
             await fs.mkdir(path.dirname(targetCoverImagePath), { recursive: true });
             await fs.rename(stagedCoverImagePath, targetCoverImagePath);
-          } else {
+          } else if (!canPreservePreviousOutput) {
             await removeFileIfExists(path.join(outputDir, "assets", "covers", `${snapshot.book.assetId}.png`));
           }
 
