@@ -195,6 +195,24 @@ function parseNavHrefTitleMap(navXml: string): Map<string, string> {
   return hrefToTitle;
 }
 
+function isHtmlTocDocument(html: string): boolean {
+  return /<title>\s*Contents\s*<\/title>/i.test(html) || /\bsgc-toc-/i.test(html) || /<nav\b[^>]*(?:\bepub:type|\btype)\s*=\s*(?:"toc"|'toc')/i.test(html);
+}
+
+function mergeResolvedHrefTitleMap(
+  target: Map<string, string>,
+  source: Map<string, string>,
+  tocRelativePath: string,
+): void {
+  const tocDir = path.posix.dirname(tocRelativePath);
+  for (const [href, title] of source.entries()) {
+    const resolvedPath = resolveEpubRelativePath(tocDir, href);
+    if (!target.has(resolvedPath)) {
+      target.set(resolvedPath, title);
+    }
+  }
+}
+
 function normalizeEpubRelativePath(inputPath: string): string {
   const normalized = path.posix.normalize(inputPath.replace(/\\/g, "/"));
   return normalized.replace(/^\/+/, "").replace(/^(?:\.\.\/)+/g, "");
@@ -278,27 +296,17 @@ function findFallbackCoverItemId(parsedOpf: ParsedOpf): string | null {
   return null;
 }
 
-function buildChapterTitleMapByHrefResolution(
+function buildChapterTitleMapByResolvedPath(
   manifestHrefById: Map<string, string>,
-  hrefToTitle: Map<string, string>,
+  titleByPath: Map<string, string>,
   opfRelativePath: string,
-  tocRelativePath: string,
 ): Map<string, string> {
   const chapterTitleByKey = new Map<string, string>();
   const opfDir = path.posix.dirname(opfRelativePath);
-  const tocDir = path.posix.dirname(tocRelativePath);
-  const resolvedTitleByPath = new Map<string, string>();
-
-  for (const [tocHref, title] of hrefToTitle.entries()) {
-    const resolvedTocPath = resolveEpubRelativePath(tocDir, tocHref);
-    if (!resolvedTitleByPath.has(resolvedTocPath)) {
-      resolvedTitleByPath.set(resolvedTocPath, title);
-    }
-  }
 
   for (const [key, href] of manifestHrefById.entries()) {
     const contentPath = resolveEpubRelativePath(opfDir, href);
-    const matchedTitle = resolvedTitleByPath.get(contentPath);
+    const matchedTitle = titleByPath.get(contentPath);
     if (matchedTitle) {
       chapterTitleByKey.set(key, matchedTitle);
     }
@@ -329,7 +337,8 @@ export async function readEpubChapterTitleByKey(bookPath: string | null): Promis
     return new Map<string, string>();
   }
 
-  const { manifestHrefById, ncxItemId, navItemId } = parseOpfManifest(opfXml);
+  const { manifestHrefById, manifestMediaTypeById, ncxItemId, navItemId } = parseOpfManifest(opfXml);
+  const titleByPath = new Map<string, string>();
 
   if (ncxItemId) {
     const ncxHref = manifestHrefById.get(ncxItemId);
@@ -337,10 +346,7 @@ export async function readEpubChapterTitleByKey(bookPath: string | null): Promis
       const ncxRelativePath = resolveEpubRelativePath(path.posix.dirname(rootfileRelativePath), ncxHref);
       const ncxXml = await readEpubEntryText(bookPath, isDirectory, ncxRelativePath);
       if (ncxXml) {
-        const hrefToTitle = parseTocHrefTitleMap(ncxXml);
-        if (hrefToTitle.size > 0) {
-          return buildChapterTitleMapByHrefResolution(manifestHrefById, hrefToTitle, rootfileRelativePath, ncxRelativePath);
-        }
+        mergeResolvedHrefTitleMap(titleByPath, parseTocHrefTitleMap(ncxXml), ncxRelativePath);
       }
     }
   }
@@ -351,12 +357,28 @@ export async function readEpubChapterTitleByKey(bookPath: string | null): Promis
       const navRelativePath = resolveEpubRelativePath(path.posix.dirname(rootfileRelativePath), navHref);
       const navXml = await readEpubEntryText(bookPath, isDirectory, navRelativePath);
       if (navXml) {
-        const hrefToTitle = parseNavHrefTitleMap(navXml);
-        if (hrefToTitle.size > 0) {
-          return buildChapterTitleMapByHrefResolution(manifestHrefById, hrefToTitle, rootfileRelativePath, navRelativePath);
-        }
+        mergeResolvedHrefTitleMap(titleByPath, parseNavHrefTitleMap(navXml), navRelativePath);
       }
     }
+  }
+
+  for (const [itemId, href] of manifestHrefById.entries()) {
+    if (itemId === navItemId || itemId === ncxItemId) {
+      continue;
+    }
+    const mediaType = manifestMediaTypeById.get(itemId) ?? "";
+    if (!/x?html/i.test(mediaType)) {
+      continue;
+    }
+    const relativePath = resolveEpubRelativePath(path.posix.dirname(rootfileRelativePath), href);
+    const html = await readEpubEntryText(bookPath, isDirectory, relativePath);
+    if (html && isHtmlTocDocument(html)) {
+      mergeResolvedHrefTitleMap(titleByPath, parseNavHrefTitleMap(html), relativePath);
+    }
+  }
+
+  if (titleByPath.size > 0) {
+    return buildChapterTitleMapByResolvedPath(manifestHrefById, titleByPath, rootfileRelativePath);
   }
 
   return new Map<string, string>();

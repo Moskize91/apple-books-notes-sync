@@ -165,6 +165,79 @@ test("readEpubChapterTitleByKey resolves EPUB3 nav labels from OPF nav", async (
   assert.equal(chapterTitleByKey.get("chapter_2"), "第二章 展开");
 });
 
+test("readEpubChapterTitleByKey resolves nested HTML table of contents links", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "epub-html-toc-map-"));
+  const bookRoot = path.join(tempRoot, "book.epub");
+  await fs.mkdir(path.join(bookRoot, "META-INF"), { recursive: true });
+  await fs.mkdir(path.join(bookRoot, "OPS", "text"), { recursive: true });
+
+  await fs.writeFile(
+    path.join(bookRoot, "META-INF", "container.xml"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+`,
+    "utf8",
+  );
+
+  await fs.writeFile(
+    path.join(bookRoot, "OPS", "package.opf"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <manifest>
+    <item id="volume_toc" href="text/volume-toc.html" media-type="application/xhtml+xml"/>
+    <item id="chapter_1" href="text/chapter-1.html" media-type="application/xhtml+xml"/>
+    <item id="chapter_2" href="text/chapter-2.html" media-type="application/xhtml+xml"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="volume_toc"/>
+    <itemref idref="chapter_1"/>
+    <itemref idref="chapter_2"/>
+  </spine>
+</package>
+`,
+    "utf8",
+  );
+
+  await fs.writeFile(
+    path.join(bookRoot, "OPS", "toc.ncx"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="n1" playOrder="1">
+      <navLabel><text>套装卷名</text></navLabel>
+      <content src="text/volume-toc.html#volume"/>
+    </navPoint>
+  </navMap>
+</ncx>
+`,
+    "utf8",
+  );
+
+  await fs.writeFile(
+    path.join(bookRoot, "OPS", "text", "volume-toc.html"),
+    `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Contents</title></head>
+  <body>
+    <div class="sgc-toc-title">目录</div>
+    <div class="sgc-toc-level"><a href="chapter-1.html#c1">第一篇 起点</a></div>
+    <div class="sgc-toc-level"><a href="chapter-2.html#c2">第二篇 展开</a></div>
+  </body>
+</html>
+`,
+    "utf8",
+  );
+
+  const chapterTitleByKey = await readEpubChapterTitleByKey(bookRoot);
+  assert.equal(chapterTitleByKey.get("chapter_1"), "第一篇 起点");
+  assert.equal(chapterTitleByKey.get("chapter_2"), "第二篇 展开");
+});
+
 test("readEpubChapterTitleByKey supports .epub zip file", async (context) => {
   const unzipCheck = spawnSync("unzip", ["-v"], { stdio: "ignore" });
   const zipCheck = spawnSync("zip", ["-v"], { stdio: "ignore" });
