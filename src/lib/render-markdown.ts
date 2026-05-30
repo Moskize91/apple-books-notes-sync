@@ -247,7 +247,7 @@ export function renderEpubBookMarkdown(
     ["publisher", book.publisher],
     ["format", "EPUB"],
     ["annotation_count", annotations.length],
-    ["最后修改时间", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
+    ["last_modified_at", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
     ["cover", coverImagePropertyValue ?? null],
     ["source_file", book.path],
   ]);
@@ -333,7 +333,7 @@ export function renderPdfBookMarkdown(
     ["format", "PDF"],
     ["pdf_beta", true],
     ["annotated_pages", pages.length],
-    ["最后修改时间", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
+    ["last_modified_at", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
     ["cover", coverImagePropertyValue ?? null],
     ["source_file", book.path],
   ]);
