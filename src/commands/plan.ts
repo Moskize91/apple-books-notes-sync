@@ -100,6 +100,9 @@ Change reasons:
   pdf-assets-missing
     PDF image assets are missing while prior sync state exists.
 
+  cover-assets-missing
+    Cover image asset is missing while prior sync state expects one.
+
   removed
     Prior sync state exists, but the book is no longer in Apple Books.
 

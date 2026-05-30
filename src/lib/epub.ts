@@ -63,15 +63,21 @@ function findRootfilePath(containerXml: string): string | null {
 
 type ParsedOpf = {
   manifestHrefById: Map<string, string>;
+  manifestMediaTypeById: Map<string, string>;
+  manifestPropertiesById: Map<string, string[]>;
   ncxItemId: string | null;
   navItemId: string | null;
+  coverItemId: string | null;
   spineOrderById: Map<string, number>;
 };
 
 function parseOpfManifest(opfXml: string): ParsedOpf {
   const manifestHrefById = new Map<string, string>();
+  const manifestMediaTypeById = new Map<string, string>();
+  const manifestPropertiesById = new Map<string, string[]>();
   let ncxItemId: string | null = null;
   let navItemId: string | null = null;
+  let coverItemId: string | null = null;
   const spineOrderById = new Map<string, number>();
 
   const spineTagMatch = opfXml.match(/<spine\b[^>]*>/i);
@@ -93,6 +99,16 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
     itemrefMatch = itemrefPattern.exec(opfXml);
   }
 
+  const metaPattern = /<meta\b[^>]*>/gi;
+  let metaMatch = metaPattern.exec(opfXml);
+  while (metaMatch) {
+    const attrs = parseXmlAttributes(metaMatch[0]);
+    if ((attrs.get("name") ?? "").toLowerCase() === "cover") {
+      coverItemId = attrs.get("content") ?? coverItemId;
+    }
+    metaMatch = metaPattern.exec(opfXml);
+  }
+
   const itemPattern = /<item\b[^>]*>/gi;
   let itemMatch = itemPattern.exec(opfXml);
   while (itemMatch) {
@@ -101,13 +117,23 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
     const href = attrs.get("href");
     if (id && href) {
       manifestHrefById.set(id, href);
+      const mediaType = attrs.get("media-type");
+      if (mediaType) {
+        manifestMediaTypeById.set(id, mediaType);
+      }
       const properties = attrs
         .get("properties")
         ?.split(/\s+/)
         .map((token) => token.trim())
         .filter((token) => token.length > 0);
+      if (properties && properties.length > 0) {
+        manifestPropertiesById.set(id, properties);
+      }
       if (!navItemId && properties?.includes("nav")) {
         navItemId = id;
+      }
+      if (!coverItemId && properties?.includes("cover-image")) {
+        coverItemId = id;
       }
       if (!ncxItemId && attrs.get("media-type") === "application/x-dtbncx+xml") {
         ncxItemId = id;
@@ -116,7 +142,15 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
     itemMatch = itemPattern.exec(opfXml);
   }
 
-  return { manifestHrefById, ncxItemId, navItemId, spineOrderById };
+  return {
+    manifestHrefById,
+    manifestMediaTypeById,
+    manifestPropertiesById,
+    ncxItemId,
+    navItemId,
+    coverItemId,
+    spineOrderById,
+  };
 }
 
 function parseTocHrefTitleMap(ncxXml: string): Map<string, string> {
@@ -193,6 +227,55 @@ async function readEpubEntryText(bookPath: string, isDirectory: boolean, relativ
     return readDirectoryEntryText(bookPath, relativePath);
   }
   return readZipEntryText(bookPath, relativePath);
+}
+
+async function readDirectoryEntryBuffer(rootPath: string, relativePath: string): Promise<Buffer | null> {
+  const filePath = path.resolve(rootPath, relativePath);
+  return fs.readFile(filePath).catch(() => null);
+}
+
+async function readZipEntryBuffer(zipPath: string, relativePath: string): Promise<Buffer | null> {
+  const entryPath = normalizeEpubRelativePath(relativePath);
+  try {
+    const { stdout } = await execFileAsync("unzip", ["-p", zipPath, entryPath], {
+      encoding: "buffer",
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+  } catch {
+    return null;
+  }
+}
+
+async function readEpubEntryBuffer(bookPath: string, isDirectory: boolean, relativePath: string): Promise<Buffer | null> {
+  if (isDirectory) {
+    return readDirectoryEntryBuffer(bookPath, relativePath);
+  }
+  return readZipEntryBuffer(bookPath, relativePath);
+}
+
+function findFallbackCoverItemId(parsedOpf: ParsedOpf): string | null {
+  for (const [id, properties] of parsedOpf.manifestPropertiesById.entries()) {
+    if (properties.includes("cover-image")) {
+      return id;
+    }
+  }
+
+  for (const [id, mediaType] of parsedOpf.manifestMediaTypeById.entries()) {
+    const href = parsedOpf.manifestHrefById.get(id) ?? "";
+    if (mediaType.startsWith("image/") && /(?:^|[/_-])cover(?:\.[^.]+)?$/i.test(href)) {
+      return id;
+    }
+  }
+
+  for (const [id, mediaType] of parsedOpf.manifestMediaTypeById.entries()) {
+    const href = parsedOpf.manifestHrefById.get(id) ?? "";
+    if (mediaType.startsWith("image/") && /cover/i.test(`${id} ${href}`)) {
+      return id;
+    }
+  }
+
+  return null;
 }
 
 function buildChapterTitleMapByHrefResolution(
@@ -303,6 +386,43 @@ export async function readEpubChapterOrderByKey(bookPath: string | null): Promis
 
   const { spineOrderById } = parseOpfManifest(opfXml);
   return spineOrderById;
+}
+
+export async function readEpubCoverImage(bookPath: string | null): Promise<Buffer | null> {
+  if (!bookPath) {
+    return null;
+  }
+
+  const stat = await fs.stat(bookPath).catch(() => null);
+  if (!stat || (!stat.isDirectory() && !stat.isFile())) {
+    return null;
+  }
+  const isDirectory = stat.isDirectory();
+
+  const containerXml = await readEpubEntryText(bookPath, isDirectory, "META-INF/container.xml");
+  if (!containerXml) {
+    return null;
+  }
+
+  const rootfileRelativePath = normalizeEpubRelativePath(findRootfilePath(containerXml) ?? "OEBPS/content.opf");
+  const opfXml = await readEpubEntryText(bookPath, isDirectory, rootfileRelativePath);
+  if (!opfXml) {
+    return null;
+  }
+
+  const parsedOpf = parseOpfManifest(opfXml);
+  const coverItemId = parsedOpf.coverItemId ?? findFallbackCoverItemId(parsedOpf);
+  if (!coverItemId) {
+    return null;
+  }
+
+  const coverHref = parsedOpf.manifestHrefById.get(coverItemId);
+  if (!coverHref) {
+    return null;
+  }
+
+  const coverRelativePath = resolveEpubRelativePath(path.posix.dirname(rootfileRelativePath), coverHref);
+  return readEpubEntryBuffer(bookPath, isDirectory, coverRelativePath);
 }
 
 export function extractChapterKey(location: string | null): string {

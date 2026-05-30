@@ -37,6 +37,7 @@ export type Book = {
   path: string | null;
   format: BookFormat;
   annotationCount: number;
+  annotationModifiedAt: Date | null;
 };
 
 export type EpubAnnotation = {
@@ -82,6 +83,7 @@ export type SyncAssetState = {
   lastSyncedAt: string | null;
   bookFileRelativePath: string | null;
   pdfAssetDirRelativePath: string | null;
+  coverImageRelativePath: string | null;
 };
 
 export type SyncState = {

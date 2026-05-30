@@ -11,6 +11,7 @@ const demoBook: Book = {
   path: "/tmp/demo.epub",
   format: "EPUB",
   annotationCount: 1,
+  annotationModifiedAt: new Date("2026-05-30T04:34:56Z"),
 };
 
 test("renderIndexMarkdown includes key fields", () => {
@@ -28,6 +29,7 @@ test("renderIndexMarkdown includes key fields", () => {
         lastSyncedAt: "2026-02-01T00:00:00.000Z",
         bookFileRelativePath: "books/demo-short-name.md",
         pdfAssetDirRelativePath: null,
+        coverImageRelativePath: null,
       },
     },
   );
@@ -71,6 +73,7 @@ test("renderIndexMarkdown sorts by lastSyncedAt desc without showing timestamp c
         lastSyncedAt: "2026-01-01T00:00:00.000Z",
         bookFileRelativePath: "books/older.md",
         pdfAssetDirRelativePath: null,
+        coverImageRelativePath: null,
       },
       [newerBook.assetId]: {
         assetId: newerBook.assetId,
@@ -80,6 +83,7 @@ test("renderIndexMarkdown sorts by lastSyncedAt desc without showing timestamp c
         lastSyncedAt: "2026-02-01T00:00:00.000Z",
         bookFileRelativePath: "books/newer.md",
         pdfAssetDirRelativePath: null,
+        coverImageRelativePath: null,
       },
     },
   );
@@ -112,11 +116,36 @@ test("renderEpubBookMarkdown groups by chapter", () => {
   assert.match(output, /author: "Author"/);
   assert.match(output, /format: "EPUB"/);
   assert.match(output, /annotation_count: 1/);
+  assert.match(output, /最后修改时间: 2026-05-30T12:34:56/);
   assert.match(output, /## 未分章/);
   assert.doesNotMatch(output, /## chapter-1\.xhtml/);
   assert.match(output, /\[2026-02-01 00:00:00\]\(<ibooks:\/\/assetid\/ABCDEF0123456789#epubcfi\(.*\)>\) Highlighted text/);
   assert.match(output, /\nMy note\n/);
   assert.doesNotMatch(output, /- 笔记:/);
+});
+
+test("renderEpubBookMarkdown includes cover path when available", () => {
+  const annotations: EpubAnnotation[] = [
+    {
+      id: "a1",
+      assetId: demoBook.assetId,
+      chapterKey: "chapter-1.xhtml",
+      selectedText: "Highlighted text",
+      noteText: null,
+      location: "epubcfi(/6/8[chapter-1.xhtml]!/4/2/1,:1,:5)",
+      createdAt: new Date("2026-02-01T00:00:00Z"),
+      kind: "highlight",
+    },
+  ];
+
+  const output = renderEpubBookMarkdown(
+    demoBook,
+    annotations,
+    undefined,
+    undefined,
+    "assets/covers/ABCDEF0123456789.png",
+  );
+  assert.match(output, /封面: "\.\.\/assets\/covers\/ABCDEF0123456789\.png"/);
 });
 
 test("renderEpubBookMarkdown maps internal chapter ids to 未分章", () => {

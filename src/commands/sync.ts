@@ -32,9 +32,11 @@ Output layout:
     index.md
     books/
       <book>.md
-    assets/
-      pdf/
-        <asset-id>/
+  assets/
+    covers/
+      <asset-id>.png
+    pdf/
+      <asset-id>/
 
 Write rules:
   absync writes inside <output.dir>/<output.managedDirName>.

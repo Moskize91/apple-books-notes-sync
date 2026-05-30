@@ -12,6 +12,7 @@ function makeBook(assetId: string, title: string): Book & { format: "EPUB" } {
     path: null,
     format: "EPUB",
     annotationCount: 1,
+    annotationModifiedAt: null,
   };
 }
 

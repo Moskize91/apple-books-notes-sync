@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import {
   readAnnotationMaxModificationDates,
   readBooks,
@@ -8,7 +9,7 @@ import {
   readPdfFallbackCounts,
 } from "./ibooks-data";
 import { buildBookFileRelativePathByAssetId, toShortBookFileStem } from "./book-file-name";
-import { readEpubChapterOrderByKey, readEpubChapterTitleByKey, sortEpubAnnotations } from "./epub";
+import { readEpubChapterOrderByKey, readEpubChapterTitleByKey, readEpubCoverImage, sortEpubAnnotations } from "./epub";
 import { log } from "./logger";
 import {
   extractPdfQuoteContent,
@@ -16,6 +17,7 @@ import {
   extractPdfPageAnnotations,
   limitPngMaxDimension,
   overlayPdfAnnotationNumbers,
+  renderPdfCoverToPng,
   renderPdfPageToPng,
   resolvePdfRenderBackend,
   shouldOverlayPdfAnnotationRect,
@@ -65,6 +67,7 @@ type BookSyncSnapshot = {
   hash: string;
   bookFileRelativePath: string | null;
   pdfAssetDirRelativePath: string | null;
+  coverImageRelativePath: string | null;
 };
 
 type BookFingerprint = {
@@ -82,6 +85,7 @@ export type SyncPlanReason =
   | "legacy-output"
   | "missing-output"
   | "pdf-assets-missing"
+  | "cover-assets-missing"
   | "removed";
 
 export type SyncPlanRegenerateReason =
@@ -139,8 +143,9 @@ export type SyncPlan = {
 };
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
-const OUTPUT_SCHEMA_VERSION = 31;
+const OUTPUT_SCHEMA_VERSION = 32;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
+const COVER_IMAGE_MAX_DIMENSION = 1200;
 
 async function pathExists(inputPath: string): Promise<boolean> {
   try {
@@ -198,6 +203,7 @@ function toSyncStateAsset(
   snapshot: BookSyncSnapshot,
   bookFileRelativePath: string | null,
   pdfAssetDirRelativePath: string | null,
+  coverImageRelativePath: string | null,
   lastSyncedAt: string | null,
 ): SyncAssetState {
   const stateTitle = bookFileRelativePath
@@ -211,6 +217,7 @@ function toSyncStateAsset(
     lastSyncedAt,
     bookFileRelativePath,
     pdfAssetDirRelativePath,
+    coverImageRelativePath,
   };
 }
 
@@ -274,6 +281,13 @@ async function hasMissingExpectedBookFile(outputDir: string, previous: SyncAsset
     return false;
   }
   return !(await pathExists(path.join(outputDir, previous.bookFileRelativePath)));
+}
+
+async function hasMissingExpectedCoverImage(outputDir: string, previous: SyncAssetState | undefined): Promise<boolean> {
+  if (!previous?.coverImageRelativePath) {
+    return false;
+  }
+  return !(await pathExists(path.join(outputDir, previous.coverImageRelativePath)));
 }
 
 async function writeFileAtomically(filePath: string, content: string): Promise<void> {
@@ -397,6 +411,52 @@ async function generatePdfPages(
   }
 
   return items;
+}
+
+async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promise<void> {
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await sharp(input)
+    .resize({
+      width: COVER_IMAGE_MAX_DIMENSION,
+      height: COVER_IMAGE_MAX_DIMENSION,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .png()
+    .toFile(outputPath);
+}
+
+async function generateBookCover(
+  book: Book & { format: SyncableBookFormat },
+  coverImageAbsolutePath: string,
+  dryRun: boolean,
+  pdfRenderBackend: PdfRenderBackend,
+): Promise<boolean> {
+  if (!book.path) {
+    return false;
+  }
+
+  if (book.format === "EPUB") {
+    const coverBuffer = await readEpubCoverImage(book.path);
+    if (!coverBuffer) {
+      return false;
+    }
+    if (!dryRun) {
+      await writeCoverPngFromBuffer(coverBuffer, coverImageAbsolutePath);
+    }
+    return true;
+  }
+
+  if (book.format === "PDF") {
+    if (!dryRun) {
+      await fs.mkdir(path.dirname(coverImageAbsolutePath), { recursive: true });
+      renderPdfCoverToPng(book.path, coverImageAbsolutePath, 2, pdfRenderBackend);
+      await limitPngMaxDimension(coverImageAbsolutePath, COVER_IMAGE_MAX_DIMENSION);
+    }
+    return true;
+  }
+
+  return false;
 }
 
 function buildAnnotationsByAssetId(
@@ -531,6 +591,7 @@ export async function buildSyncPlan(
         book.format === "PDF" && bookFileRelativePath
           ? path.posix.join("assets", "pdf", book.assetId)
           : null,
+      coverImageRelativePath: bookFileRelativePath ? path.posix.join("assets", "covers", `${book.assetId}.png`) : null,
     };
   });
 
@@ -546,6 +607,7 @@ export async function buildSyncPlan(
         : toShortBookFileStem(snapshot.book.title),
       bookFileRelativePath: snapshot.bookFileRelativePath,
       pdfAssetDirRelativePath: snapshot.pdfAssetDirRelativePath,
+      coverImageRelativePath: snapshot.coverImageRelativePath,
     };
   }
 
@@ -592,6 +654,12 @@ export async function buildSyncPlan(
     if (await hasMissingExpectedBookFile(outputDir, previous)) {
       changedSnapshots.push(snapshot);
       changed.push(toPlanBook(snapshot, "missing-output"));
+      continue;
+    }
+
+    if (await hasMissingExpectedCoverImage(outputDir, previous)) {
+      changedSnapshots.push(snapshot);
+      changed.push(toPlanBook(snapshot, "cover-assets-missing"));
       continue;
     }
 
@@ -732,9 +800,13 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
             if (previousAssetState?.pdfAssetDirRelativePath) {
               await removeDirectoryIfExists(path.join(outputDir, previousAssetState.pdfAssetDirRelativePath));
             }
+            if (previousAssetState?.coverImageRelativePath) {
+              await removeFileIfExists(path.join(outputDir, previousAssetState.coverImageRelativePath));
+            }
             await removeDirectoryIfExists(path.join(outputDir, "assets", "pdf", snapshot.book.assetId));
+            await removeFileIfExists(path.join(outputDir, "assets", "covers", `${snapshot.book.assetId}.png`));
           }
-          nextStateAssets[snapshot.book.assetId] = toSyncStateAsset(snapshot, null, null, syncStartedAt);
+          nextStateAssets[snapshot.book.assetId] = toSyncStateAsset(snapshot, null, null, null, syncStartedAt);
           stats.successBooks += 1;
           continue;
         }
@@ -742,41 +814,76 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
         let markdown = "";
         let generatedPdfImageCount = 0;
         let stagedPdfAssetDir = "";
+        let generatedCoverImageCount = 0;
+        let stagedCoverImagePath = "";
         let nextBookFileRelativePath: string | null = snapshot.bookFileRelativePath;
         let nextPdfAssetDirRelativePath: string | null = snapshot.pdfAssetDirRelativePath;
+        let nextCoverImageRelativePath: string | null = snapshot.coverImageRelativePath;
+        let epubNotes: EpubAnnotation[] = [];
+        let epubChapterTitleByKey: Map<string, string> | undefined;
+        let epubChapterOrderByKey: Map<string, number> | undefined;
+        let pdfPages: PdfPageRenderItem[] = [];
 
         if (snapshot.book.format === "EPUB") {
-          const notes = annotationsByAssetId.get(snapshot.book.assetId) ?? [];
-          const chapterTitleByKey = chapterTitleByKeyByAssetId.get(snapshot.book.assetId);
-          const chapterOrderByKey = chapterOrderByKeyByAssetId.get(snapshot.book.assetId);
-          if (notes.length === 0) {
+          epubNotes = annotationsByAssetId.get(snapshot.book.assetId) ?? [];
+          epubChapterTitleByKey = chapterTitleByKeyByAssetId.get(snapshot.book.assetId);
+          epubChapterOrderByKey = chapterOrderByKeyByAssetId.get(snapshot.book.assetId);
+          if (epubNotes.length === 0) {
             nextBookFileRelativePath = null;
             nextPdfAssetDirRelativePath = null;
+            nextCoverImageRelativePath = null;
           } else {
-            markdown = renderEpubBookMarkdown(snapshot.book, notes, chapterTitleByKey, chapterOrderByKey);
             nextBookFileRelativePath = snapshot.bookFileRelativePath;
           }
         } else {
-          let pages: PdfPageRenderItem[] = [];
           if (config.pdfBetaEnabled && snapshot.book.path) {
             stagedPdfAssetDir = path.join(stagingRoot, "assets", "pdf", snapshot.book.assetId);
-            pages = await generatePdfPages(
+            pdfPages = await generatePdfPages(
               snapshot.book,
               stagedPdfAssetDir,
               options.dryRun,
               resolvedPdfRenderBackend,
             );
-            generatedPdfImageCount = pages.filter((page) => page.imageRelativePath).length;
+            generatedPdfImageCount = pdfPages.filter((page) => page.imageRelativePath).length;
           }
-          if (pages.length === 0) {
+          if (pdfPages.length === 0) {
             nextBookFileRelativePath = null;
             nextPdfAssetDirRelativePath = null;
+            nextCoverImageRelativePath = null;
           } else {
-            markdown = renderPdfBookMarkdown(snapshot.book, pages);
             nextBookFileRelativePath = snapshot.bookFileRelativePath;
             nextPdfAssetDirRelativePath =
               generatedPdfImageCount > 0 ? path.posix.join("assets", "pdf", snapshot.book.assetId) : null;
           }
+        }
+
+        if (nextBookFileRelativePath && snapshot.coverImageRelativePath) {
+          stagedCoverImagePath = path.join(stagingRoot, snapshot.coverImageRelativePath);
+          const hasCover = await generateBookCover(
+            snapshot.book,
+            stagedCoverImagePath,
+            options.dryRun,
+            resolvedPdfRenderBackend,
+          );
+          if (hasCover) {
+            generatedCoverImageCount = 1;
+            nextCoverImageRelativePath = snapshot.coverImageRelativePath;
+          } else {
+            nextCoverImageRelativePath = null;
+          }
+        }
+
+        if (nextBookFileRelativePath) {
+          markdown =
+            snapshot.book.format === "EPUB"
+              ? renderEpubBookMarkdown(
+                  snapshot.book,
+                  epubNotes,
+                  epubChapterTitleByKey,
+                  epubChapterOrderByKey,
+                  nextCoverImageRelativePath,
+                )
+              : renderPdfBookMarkdown(snapshot.book, pdfPages, nextCoverImageRelativePath);
         }
 
         if (!options.dryRun) {
@@ -795,6 +902,14 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
             }
           }
 
+          if (nextCoverImageRelativePath && stagedCoverImagePath) {
+            const targetCoverImagePath = path.join(outputDir, nextCoverImageRelativePath);
+            await fs.mkdir(path.dirname(targetCoverImagePath), { recursive: true });
+            await fs.rename(stagedCoverImagePath, targetCoverImagePath);
+          } else {
+            await removeFileIfExists(path.join(outputDir, "assets", "covers", `${snapshot.book.assetId}.png`));
+          }
+
           if (
             previousAssetState &&
             previousAssetState.bookFileRelativePath &&
@@ -810,17 +925,26 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
           ) {
             await removeDirectoryIfExists(path.join(outputDir, previousAssetState.pdfAssetDirRelativePath));
           }
+
+          if (
+            previousAssetState &&
+            previousAssetState.coverImageRelativePath &&
+            previousAssetState.coverImageRelativePath !== nextCoverImageRelativePath
+          ) {
+            await removeFileIfExists(path.join(outputDir, previousAssetState.coverImageRelativePath));
+          }
         }
 
         nextStateAssets[snapshot.book.assetId] = toSyncStateAsset(
           snapshot,
           nextBookFileRelativePath,
           nextPdfAssetDirRelativePath,
+          nextCoverImageRelativePath,
           syncStartedAt,
         );
         stats.successBooks += 1;
         if (nextBookFileRelativePath) {
-          stats.generatedFiles += 1 + generatedPdfImageCount;
+          stats.generatedFiles += 1 + generatedPdfImageCount + generatedCoverImageCount;
         }
       } catch (error: unknown) {
         const reason = error instanceof Error ? error.message : "unknown error";
@@ -828,6 +952,7 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
         stats.failedBooks += 1;
         if (!options.dryRun) {
           await removeDirectoryIfExists(path.join(stagingRoot, "assets", "pdf", snapshot.book.assetId));
+          await removeFileIfExists(path.join(stagingRoot, "assets", "covers", `${snapshot.book.assetId}.png`));
         }
       }
     }
@@ -846,6 +971,9 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
             }
             if (previousAsset.pdfAssetDirRelativePath) {
               await removeDirectoryIfExists(path.join(outputDir, previousAsset.pdfAssetDirRelativePath));
+            }
+            if (previousAsset.coverImageRelativePath) {
+              await removeFileIfExists(path.join(outputDir, previousAsset.coverImageRelativePath));
             }
           } catch (error: unknown) {
             const reason = error instanceof Error ? error.message : "unknown error";

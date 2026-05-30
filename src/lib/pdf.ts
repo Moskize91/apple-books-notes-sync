@@ -637,6 +637,15 @@ export function renderPdfPageToPng(
   renderPdfPageToPngWithSwift(pdfPath, pageNumber, outputPath, scale);
 }
 
+export function renderPdfCoverToPng(
+  pdfPath: string,
+  outputPath: string,
+  scale = 2,
+  backend: PdfRenderBackend = "auto",
+): void {
+  renderPdfPageToPng(pdfPath, 1, outputPath, scale, backend);
+}
+
 export async function limitPngMaxDimension(imagePath: string, maxDimension: number): Promise<void> {
   const metadata = await sharp(imagePath).metadata();
   if (!metadata.width || !metadata.height) {
