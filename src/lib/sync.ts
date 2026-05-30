@@ -143,7 +143,7 @@ export type SyncPlan = {
 };
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
-const OUTPUT_SCHEMA_VERSION = 33;
+const OUTPUT_SCHEMA_VERSION = 34;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 
@@ -197,6 +197,13 @@ async function getPdfFileStamp(pdfPath: string | null): Promise<PdfFileStamp | "
   } catch {
     return "missing";
   }
+}
+
+async function isBookSourceAvailable(book: Book): Promise<boolean> {
+  if (!book.path) {
+    return false;
+  }
+  return pathExists(book.path);
 }
 
 function toSyncStateAsset(
@@ -482,6 +489,19 @@ async function buildBookFingerprint(
   pdfFallbackCounts: Map<string, number>,
   previousStateAssets: Record<string, SyncAssetState>,
 ): Promise<BookFingerprint> {
+  const previous = previousStateAssets[book.assetId];
+  const sourceAvailable = await isBookSourceAvailable(book);
+  if (!sourceAvailable) {
+    const unavailableHash =
+      previous?.hash ??
+      `${buildBookSyncHash(book.format, annotationMaxModificationDates.get(book.assetId) ?? null, "missing")}|schema:${OUTPUT_SCHEMA_VERSION}`;
+    return {
+      book,
+      hash: unavailableHash,
+      shouldHaveOutput: Boolean(previous?.bookFileRelativePath),
+    };
+  }
+
   const pdfFileStamp = book.format === "PDF" ? await getPdfFileStamp(book.path) : null;
   const baseHash = buildBookSyncHash(book.format, annotationMaxModificationDates.get(book.assetId) ?? null, pdfFileStamp);
   const hash = `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}`;
@@ -490,7 +510,6 @@ async function buildBookFingerprint(
       ? (epubRenderableCounts.get(book.assetId) ?? 0) > 0 ||
         Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath)
       : (() => {
-          const previous = previousStateAssets[book.assetId];
           if (previous && previous.hash === hash) {
             return previous.bookFileRelativePath !== null;
           }
