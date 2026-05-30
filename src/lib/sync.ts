@@ -290,20 +290,6 @@ async function hasMissingExpectedBookFile(outputDir: string, previous: SyncAsset
   return !(await pathExists(path.join(outputDir, previous.bookFileRelativePath)));
 }
 
-async function hasMissingExpectedCoverImage(outputDir: string, previous: SyncAssetState | undefined): Promise<boolean> {
-  if (!previous?.coverImageRelativePath) {
-    return false;
-  }
-  return !(await pathExists(path.join(outputDir, previous.coverImageRelativePath)));
-}
-
-async function hasMissingSnapshotCoverImage(outputDir: string, snapshot: BookSyncSnapshot): Promise<boolean> {
-  if (!snapshot.bookFileRelativePath || !snapshot.coverImageRelativePath) {
-    return false;
-  }
-  return !(await pathExists(path.join(outputDir, snapshot.coverImageRelativePath)));
-}
-
 async function writeFileAtomically(filePath: string, content: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp-${Date.now()}-${process.pid}`;
@@ -687,15 +673,6 @@ export async function buildSyncPlan(
     if (await hasMissingExpectedBookFile(outputDir, previous)) {
       changedSnapshots.push(snapshot);
       changed.push(toPlanBook(snapshot, "missing-output"));
-      continue;
-    }
-
-    if (
-      (await hasMissingExpectedCoverImage(outputDir, previous)) ||
-      (await hasMissingSnapshotCoverImage(outputDir, snapshot))
-    ) {
-      changedSnapshots.push(snapshot);
-      changed.push(toPlanBook(snapshot, "cover-assets-missing"));
       continue;
     }
 
