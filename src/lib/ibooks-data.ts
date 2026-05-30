@@ -9,6 +9,7 @@ type RawBookRow = {
   path: string | null;
   contentType: number;
   annotationCount: number | null;
+  maxModificationDate: number | null;
   publisher: string | null;
 };
 
@@ -20,11 +21,6 @@ type RawEpubAnnotationRow = {
   noteText: string | null;
   location: string | null;
   creationDate: number | null;
-};
-
-type RawPdfFallbackRow = {
-  assetId: string;
-  fallbackCount: number;
 };
 
 type RawAssetAnnotationModificationRow = {
@@ -72,6 +68,13 @@ function toDateFromAppleEpoch(value: number | null): Date {
   return new Date((value + APPLE_EPOCH_SECONDS) * 1000);
 }
 
+function toNullableDateFromAppleEpoch(value: number | null): Date | null {
+  if (!value || Number.isNaN(value)) {
+    return null;
+  }
+  return toDateFromAppleEpoch(value);
+}
+
 export function readBooks(
   libraryDbPath: string,
   annotationDbPath: string,
@@ -96,6 +99,7 @@ export function readBooks(
       b.ZPATH AS path,
       b.ZCONTENTTYPE AS contentType,
       COALESCE(cnt.annotationCount, 0) AS annotationCount,
+      mod.maxModificationDate AS maxModificationDate,
       ${maybeSelectPublisher}
     FROM ZBKLIBRARYASSET b
     LEFT JOIN (
@@ -106,6 +110,14 @@ export function readBooks(
       WHERE ZANNOTATIONDELETED IS NULL OR ZANNOTATIONDELETED = 0
       GROUP BY ZANNOTATIONASSETID
     ) cnt ON cnt.assetId = b.ZASSETID
+    LEFT JOIN (
+      SELECT
+        ZANNOTATIONASSETID AS assetId,
+        MAX(ZANNOTATIONMODIFICATIONDATE) AS maxModificationDate
+      FROM anno.ZAEANNOTATION
+      WHERE ZANNOTATIONDELETED IS NULL OR ZANNOTATIONDELETED = 0
+      GROUP BY ZANNOTATIONASSETID
+    ) mod ON mod.assetId = b.ZASSETID
     ${maybeJoinEpub}
     WHERE b.ZCONTENTTYPE IN (1, 3, 4)
     ORDER BY b.ZTITLE COLLATE NOCASE;
@@ -122,6 +134,7 @@ export function readBooks(
       path: normalizeNullableText(row.path),
       format: toFormat(row.contentType),
       annotationCount: Number(row.annotationCount ?? 0),
+      annotationModifiedAt: toNullableDateFromAppleEpoch(row.maxModificationDate),
     };
   });
 }
@@ -178,27 +191,6 @@ export function readEpubAnnotations(annotationDbPath: string, libraryDbPath: str
 
       return Boolean(annotation.selectedText || annotation.noteText);
     });
-}
-
-export function readPdfFallbackCounts(annotationDbPath: string, libraryDbPath: string): Map<string, number> {
-  const sql = `
-    ATTACH DATABASE '${quoteSqlPath(libraryDbPath)}' AS lib;
-    SELECT
-      a.ZANNOTATIONASSETID AS assetId,
-      COUNT(*) AS fallbackCount
-    FROM ZAEANNOTATION a
-    INNER JOIN lib.ZBKLIBRARYASSET b ON b.ZASSETID = a.ZANNOTATIONASSETID
-    WHERE (a.ZANNOTATIONDELETED IS NULL OR a.ZANNOTATIONDELETED = 0)
-      AND b.ZCONTENTTYPE = 3
-    GROUP BY a.ZANNOTATIONASSETID;
-  `;
-
-  const rows = querySqlite<RawPdfFallbackRow>(annotationDbPath, sql);
-  const result = new Map<string, number>();
-  for (const row of rows) {
-    result.set(row.assetId, Number(row.fallbackCount ?? 0));
-  }
-  return result;
 }
 
 export function readEpubRenderableCounts(annotationDbPath: string, libraryDbPath: string): Map<string, number> {

@@ -218,6 +218,8 @@ Managed output layout:
   books/
     <book>.md
   assets/
+    covers/
+      <asset-id>.png
     pdf/
       <asset-id>/
 ```

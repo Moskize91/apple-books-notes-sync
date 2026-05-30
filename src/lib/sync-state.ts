@@ -46,6 +46,8 @@ function normalizeStateAsset(assetId: string, value: unknown): SyncAssetState | 
 
   const pdfAssetDirRelativePath =
     typeof candidate.pdfAssetDirRelativePath === "string" ? candidate.pdfAssetDirRelativePath : null;
+  const coverImageRelativePath =
+    typeof candidate.coverImageRelativePath === "string" ? candidate.coverImageRelativePath : null;
   const lastSyncedAt = typeof candidate.lastSyncedAt === "string" ? candidate.lastSyncedAt : null;
 
   return {
@@ -56,6 +58,7 @@ function normalizeStateAsset(assetId: string, value: unknown): SyncAssetState | 
     lastSyncedAt,
     bookFileRelativePath: candidate.bookFileRelativePath ?? null,
     pdfAssetDirRelativePath,
+    coverImageRelativePath,
   };
 }
 

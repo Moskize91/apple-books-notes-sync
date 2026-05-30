@@ -204,6 +204,8 @@ absync sync --book "Newton"
   books/
     <book>.md
   assets/
+    covers/
+      <asset-id>.png
     pdf/
       <asset-id>/
 ```

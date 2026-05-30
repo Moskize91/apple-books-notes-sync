@@ -12,6 +12,7 @@ function buildAsset(assetId: string): SyncAssetState {
     lastSyncedAt: "2026-02-28T00:00:00.000Z",
     bookFileRelativePath: `books/${assetId}.md`,
     pdfAssetDirRelativePath: `assets/pdf/${assetId}`,
+    coverImageRelativePath: `assets/covers/${assetId}.png`,
   };
 }
 
@@ -42,6 +43,7 @@ test("getSyncPlanRegenerateReason explains why an asset needs sync", () => {
     lastSyncedAt: "2026-02-28T00:00:00.000Z",
     bookFileRelativePath: "books/book-1.md",
     pdfAssetDirRelativePath: null,
+    coverImageRelativePath: null,
   };
 
   assert.equal(

@@ -15,11 +15,25 @@ type PdfRenderedPage = {
   notes: PdfRenderedNote[];
 };
 
-type FrontmatterValue = string | number | boolean;
+type FrontmatterDateTime = {
+  type: "datetime";
+  value: Date;
+};
+type FrontmatterValue = string | number | boolean | FrontmatterDateTime;
 const LOCATION_SORT_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
 function fmtDate(date: Date): string {
   return date.toISOString().replace("T", " ").slice(0, 19);
+}
+
+function fmtObsidianDateTime(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
 export function renderIndexMarkdown(
@@ -77,6 +91,9 @@ function escapeCell(input: string): string {
 }
 
 function toYamlScalar(value: FrontmatterValue): string {
+  if (typeof value === "object") {
+    return fmtObsidianDateTime(value.value);
+  }
   if (typeof value === "string") {
     return JSON.stringify(value);
   }
@@ -221,6 +238,7 @@ export function renderEpubBookMarkdown(
   annotations: EpubAnnotation[],
   chapterTitleByKey?: Map<string, string>,
   chapterOrderByKey?: Map<string, number>,
+  coverImagePropertyValue?: string | null,
 ): string {
   const lines: string[] = [];
   pushFrontmatter(lines, [
@@ -229,6 +247,8 @@ export function renderEpubBookMarkdown(
     ["publisher", book.publisher],
     ["format", "EPUB"],
     ["annotation_count", annotations.length],
+    ["last_modified_at", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
+    ["cover", coverImagePropertyValue ?? null],
     ["source_file", book.path],
   ]);
 
@@ -300,7 +320,11 @@ export function renderEpubBookMarkdown(
   return lines.join("\n");
 }
 
-export function renderPdfBookMarkdown(book: Book, pages: PdfRenderedPage[]): string {
+export function renderPdfBookMarkdown(
+  book: Book,
+  pages: PdfRenderedPage[],
+  coverImagePropertyValue?: string | null,
+): string {
   const lines: string[] = [];
   pushFrontmatter(lines, [
     ["title", book.title],
@@ -309,6 +333,8 @@ export function renderPdfBookMarkdown(book: Book, pages: PdfRenderedPage[]): str
     ["format", "PDF"],
     ["pdf_beta", true],
     ["annotated_pages", pages.length],
+    ["last_modified_at", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
+    ["cover", coverImagePropertyValue ?? null],
     ["source_file", book.path],
   ]);
 

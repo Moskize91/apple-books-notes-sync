@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { extractChapterKey, readEpubChapterTitleByKey, sortEpubAnnotations } from "../src/lib/epub";
+import { extractChapterKey, readEpubChapterTitleByKey, readEpubCoverImage, sortEpubAnnotations } from "../src/lib/epub";
 import type { EpubAnnotation } from "../src/lib/types";
 
 test("extractChapterKey reads chapter id from epubcfi", () => {
@@ -228,4 +228,38 @@ test("readEpubChapterTitleByKey supports .epub zip file", async (context) => {
 
   const chapterTitleByKey = await readEpubChapterTitleByKey(epubPath);
   assert.equal(chapterTitleByKey.get("chapter_1"), "Zip 章节");
+});
+
+test("readEpubCoverImage reads EPUB3 cover-image from directory", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "epub-cover-"));
+  const bookRoot = path.join(tempRoot, "book.epub");
+  await fs.mkdir(path.join(bookRoot, "META-INF"), { recursive: true });
+  await fs.mkdir(path.join(bookRoot, "OPS", "images"), { recursive: true });
+
+  await fs.writeFile(
+    path.join(bookRoot, "META-INF", "container.xml"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+`,
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(bookRoot, "OPS", "package.opf"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <manifest>
+    <item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/>
+  </manifest>
+</package>
+`,
+    "utf8",
+  );
+  await fs.writeFile(path.join(bookRoot, "OPS", "images", "cover.png"), Buffer.from("cover-bytes"));
+
+  const cover = await readEpubCoverImage(bookRoot);
+  assert.equal(cover?.toString(), "cover-bytes");
 });

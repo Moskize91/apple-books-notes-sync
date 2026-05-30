@@ -39,6 +39,7 @@ test("writeSyncState persists assets", async () => {
         lastSyncedAt: "2026-02-28T00:00:00.000Z",
         bookFileRelativePath: "books/book-1.md",
         pdfAssetDirRelativePath: null,
+        coverImageRelativePath: "assets/covers/asset-1.png",
       },
     };
     await writeSyncState(tempDir, assets);
@@ -46,6 +47,7 @@ test("writeSyncState persists assets", async () => {
     const reloaded = await readSyncState(tempDir);
     assert.equal(reloaded.assets["asset-1"]?.hash, "EPUB|mod:10");
     assert.equal(reloaded.assets["asset-1"]?.lastSyncedAt, "2026-02-28T00:00:00.000Z");
+    assert.equal(reloaded.assets["asset-1"]?.coverImageRelativePath, "assets/covers/asset-1.png");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
