@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import { hydrateEpubPackageMetadata } from "../lib/book-metadata";
 import { readBooks } from "../lib/ibooks-data";
 import { resolveIbooksPaths } from "../lib/ibooks-paths";
 
@@ -44,9 +45,11 @@ Examples:
     .action((options: ListBooksOptions) => {
       void (async () => {
         const paths = await resolveIbooksPaths();
-        const books = readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath).filter((book) => {
-          return book.format === "EPUB" || book.format === "PDF";
-        });
+	        const books = await hydrateEpubPackageMetadata(
+	          readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath).filter((book) => {
+	            return book.format === "EPUB" || book.format === "PDF";
+	          }),
+	        );
 
         if (options.json) {
           console.log(JSON.stringify(books, null, 2));

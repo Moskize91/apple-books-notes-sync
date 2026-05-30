@@ -71,6 +71,34 @@ type ParsedOpf = {
   spineOrderById: Map<string, number>;
 };
 
+export type EpubPackageMetadata = {
+  title: string | null;
+  creator: string | null;
+  publisher: string | null;
+};
+
+function stripXmlTags(input: string): string {
+  return input.replace(/<[^>]*>/g, "");
+}
+
+function readXmlElementText(xml: string, elementName: string): string | null {
+  const escapedElementName = elementName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`<${escapedElementName}\\b[^>]*>([\\s\\S]*?)</${escapedElementName}>`, "i");
+  const match = xml.match(pattern);
+  const value = decodeXmlEntities(stripXmlTags(match?.[1] ?? ""))
+    .replace(/\s+/g, " ")
+    .trim();
+  return value || null;
+}
+
+function parseOpfMetadata(opfXml: string): EpubPackageMetadata {
+  return {
+    title: readXmlElementText(opfXml, "dc:title"),
+    creator: readXmlElementText(opfXml, "dc:creator"),
+    publisher: readXmlElementText(opfXml, "dc:publisher"),
+  };
+}
+
 function parseOpfManifest(opfXml: string): ParsedOpf {
   const manifestHrefById = new Map<string, string>();
   const manifestMediaTypeById = new Map<string, string>();
@@ -445,6 +473,31 @@ export async function readEpubCoverImage(bookPath: string | null): Promise<Buffe
 
   const coverRelativePath = resolveEpubRelativePath(path.posix.dirname(rootfileRelativePath), coverHref);
   return readEpubEntryBuffer(bookPath, isDirectory, coverRelativePath);
+}
+
+export async function readEpubPackageMetadata(bookPath: string | null): Promise<EpubPackageMetadata> {
+  if (!bookPath) {
+    return { title: null, creator: null, publisher: null };
+  }
+
+  const stat = await fs.stat(bookPath).catch(() => null);
+  if (!stat || (!stat.isDirectory() && !stat.isFile())) {
+    return { title: null, creator: null, publisher: null };
+  }
+  const isDirectory = stat.isDirectory();
+
+  const containerXml = await readEpubEntryText(bookPath, isDirectory, "META-INF/container.xml");
+  if (!containerXml) {
+    return { title: null, creator: null, publisher: null };
+  }
+
+  const rootfileRelativePath = normalizeEpubRelativePath(findRootfilePath(containerXml) ?? "OEBPS/content.opf");
+  const opfXml = await readEpubEntryText(bookPath, isDirectory, rootfileRelativePath);
+  if (!opfXml) {
+    return { title: null, creator: null, publisher: null };
+  }
+
+  return parseOpfMetadata(opfXml);
 }
 
 export function extractChapterKey(location: string | null): string {

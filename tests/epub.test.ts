@@ -4,7 +4,13 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { extractChapterKey, readEpubChapterTitleByKey, readEpubCoverImage, sortEpubAnnotations } from "../src/lib/epub";
+import {
+  extractChapterKey,
+  readEpubChapterTitleByKey,
+  readEpubCoverImage,
+  readEpubPackageMetadata,
+  sortEpubAnnotations,
+} from "../src/lib/epub";
 import type { EpubAnnotation } from "../src/lib/types";
 
 test("extractChapterKey reads chapter id from epubcfi", () => {
@@ -335,4 +341,43 @@ test("readEpubCoverImage reads EPUB3 cover-image from directory", async () => {
 
   const cover = await readEpubCoverImage(bookRoot);
   assert.equal(cover?.toString(), "cover-bytes");
+});
+
+test("readEpubPackageMetadata reads title creator and publisher from OPF", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "epub-metadata-"));
+  const bookRoot = path.join(tempRoot, "book.epub");
+  await fs.mkdir(path.join(bookRoot, "META-INF"), { recursive: true });
+  await fs.mkdir(path.join(bookRoot, "OPS"), { recursive: true });
+
+  await fs.writeFile(
+    path.join(bookRoot, "META-INF", "container.xml"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+`,
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(bookRoot, "OPS", "package.opf"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata>
+    <dc:title>Title &amp; Subtitle</dc:title>
+    <dc:creator>Author Name</dc:creator>
+    <dc:publisher>Publisher Name</dc:publisher>
+  </metadata>
+</package>
+`,
+    "utf8",
+  );
+
+  const metadata = await readEpubPackageMetadata(bookRoot);
+  assert.deepEqual(metadata, {
+    title: "Title & Subtitle",
+    creator: "Author Name",
+    publisher: "Publisher Name",
+  });
 });
