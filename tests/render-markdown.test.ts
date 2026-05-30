@@ -145,7 +145,7 @@ test("renderEpubBookMarkdown includes cover path when available", () => {
     undefined,
     "[[iBooks/assets/covers/ABCDEF0123456789.png]]",
   );
-  assert.ok(output.includes('封面: "[[iBooks/assets/covers/ABCDEF0123456789.png]]"'));
+  assert.ok(output.includes('cover: "[[iBooks/assets/covers/ABCDEF0123456789.png]]"'));
 });
 
 test("renderEpubBookMarkdown omits cover property when unavailable", () => {
@@ -163,7 +163,7 @@ test("renderEpubBookMarkdown omits cover property when unavailable", () => {
   ];
 
   const output = renderEpubBookMarkdown(demoBook, annotations);
-  assert.doesNotMatch(output, /封面:/);
+  assert.doesNotMatch(output, /^cover:/m);
 });
 
 test("renderEpubBookMarkdown maps internal chapter ids to 未分章", () => {
