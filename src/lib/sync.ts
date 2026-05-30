@@ -6,7 +6,6 @@ import {
   readBooks,
   readEpubRenderableCounts,
   readEpubAnnotations,
-  readPdfFallbackCounts,
 } from "./ibooks-data";
 import { buildBookFileRelativePathByAssetId, toShortBookFileStem } from "./book-file-name";
 import { readEpubChapterOrderByKey, readEpubChapterTitleByKey, readEpubCoverImage, sortEpubAnnotations } from "./epub";
@@ -143,7 +142,7 @@ export type SyncPlan = {
 };
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
-const OUTPUT_SCHEMA_VERSION = 36;
+const OUTPUT_SCHEMA_VERSION = 37;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 
@@ -154,6 +153,27 @@ async function pathExists(inputPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function mapConcurrent<T, U>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<U>,
+): Promise<U[]> {
+  const results = new Array<U>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index]!, index);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 async function removeFileIfExists(filePath: string): Promise<void> {
@@ -413,6 +433,15 @@ async function generatePdfPages(
   return items;
 }
 
+async function hasRenderablePdfAnnotations(pdfPath: string): Promise<boolean> {
+  const pages = await extractPdfPageAnnotations(pdfPath);
+  return pages.some((page) => {
+    return page.annotations.some((annotation) => {
+      return extractPdfQuoteContent(annotation).length > 0 || extractPdfUserNoteContent(annotation).length > 0;
+    });
+  });
+}
+
 async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promise<void> {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await sharp(input)
@@ -479,15 +508,16 @@ async function buildBookFingerprint(
   book: Book & { format: SyncableBookFormat },
   annotationMaxModificationDates: Map<string, number | null>,
   epubRenderableCounts: Map<string, number>,
-  pdfFallbackCounts: Map<string, number>,
   previousStateAssets: Record<string, SyncAssetState>,
 ): Promise<BookFingerprint> {
   const previous = previousStateAssets[book.assetId];
+  const annotationModifiedAtForHash =
+    book.format === "PDF" ? null : annotationMaxModificationDates.get(book.assetId) ?? null;
   const sourceAvailable = await isBookSourceAvailable(book);
   if (!sourceAvailable) {
     const unavailableHash =
       previous?.hash ??
-      `${buildBookSyncHash(book.format, annotationMaxModificationDates.get(book.assetId) ?? null, "missing")}|schema:${OUTPUT_SCHEMA_VERSION}`;
+      `${buildBookSyncHash(book.format, annotationModifiedAtForHash, "missing")}|schema:${OUTPUT_SCHEMA_VERSION}`;
     return {
       book,
       hash: unavailableHash,
@@ -496,18 +526,19 @@ async function buildBookFingerprint(
   }
 
   const pdfFileStamp = book.format === "PDF" ? await getPdfFileStamp(book.path) : null;
-  const baseHash = buildBookSyncHash(book.format, annotationMaxModificationDates.get(book.assetId) ?? null, pdfFileStamp);
+  const baseHash = buildBookSyncHash(book.format, annotationModifiedAtForHash, pdfFileStamp);
   const hash = `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}`;
-  const shouldHaveOutput =
-    book.format === "EPUB"
-      ? (epubRenderableCounts.get(book.assetId) ?? 0) > 0 ||
-        Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath)
-      : (() => {
-          if (previous && previous.hash === hash) {
-            return previous.bookFileRelativePath !== null;
-          }
-          return (pdfFallbackCounts.get(book.assetId) ?? 0) > 0 || Boolean(previous?.bookFileRelativePath);
-        })();
+  let shouldHaveOutput: boolean;
+  if (book.format === "EPUB") {
+    shouldHaveOutput =
+      (epubRenderableCounts.get(book.assetId) ?? 0) > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
+  } else if (previous && previous.hash === hash) {
+    shouldHaveOutput = previous.bookFileRelativePath !== null;
+  } else if (!book.path) {
+    shouldHaveOutput = false;
+  } else {
+    shouldHaveOutput = await hasRenderablePdfAnnotations(book.path);
+  }
 
   return {
     book,
@@ -573,23 +604,20 @@ export async function buildSyncPlan(
     paths.libraryDbPath,
   );
   const epubRenderableCounts = readEpubRenderableCounts(paths.annotationDbPath, paths.libraryDbPath);
-  const pdfFallbackCounts = readPdfFallbackCounts(paths.annotationDbPath, paths.libraryDbPath);
-  const allBookFingerprints = await Promise.all(
-    allBooks.map((book) => {
-      return buildBookFingerprint(
-        book,
-        annotationMaxModificationDates,
-        epubRenderableCounts,
-        pdfFallbackCounts,
-        previousState.assets,
-      );
-    }),
-  );
+  const allBookFingerprints = await mapConcurrent(books, 2, (book) => {
+    return buildBookFingerprint(book, annotationMaxModificationDates, epubRenderableCounts, previousState.assets);
+  });
   const fingerprintByAssetId = new Map<string, BookFingerprint>();
   const hasOutputByAssetId = new Map<string, boolean>();
   for (const fingerprint of allBookFingerprints) {
     fingerprintByAssetId.set(fingerprint.book.assetId, fingerprint);
     hasOutputByAssetId.set(fingerprint.book.assetId, fingerprint.shouldHaveOutput);
+  }
+  for (const book of allBooks) {
+    if (hasOutputByAssetId.has(book.assetId)) {
+      continue;
+    }
+    hasOutputByAssetId.set(book.assetId, Boolean(previousState.assets[book.assetId]?.bookFileRelativePath));
   }
   const bookFileRelativePathByAssetId = buildBookFileRelativePathByAssetId(
     allBooks,
@@ -599,9 +627,11 @@ export async function buildSyncPlan(
 
   const bookSnapshots: BookSyncSnapshot[] = books.map((book) => {
     const fingerprint = fingerprintByAssetId.get(book.assetId);
+    const annotationModifiedAtForHash =
+      book.format === "PDF" ? null : annotationMaxModificationDates.get(book.assetId) ?? null;
     const hash =
       fingerprint?.hash ??
-      `${buildBookSyncHash(book.format, annotationMaxModificationDates.get(book.assetId) ?? null, null)}|schema:${OUTPUT_SCHEMA_VERSION}`;
+      `${buildBookSyncHash(book.format, annotationModifiedAtForHash, null)}|schema:${OUTPUT_SCHEMA_VERSION}`;
     const bookFileRelativePath = bookFileRelativePathByAssetId.get(book.assetId) ?? null;
     return {
       book,
