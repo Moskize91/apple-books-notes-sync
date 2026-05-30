@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { hydrateEpubPackageMetadata } from "./book-metadata";
 import {
   readAnnotationMaxModificationDates,
   readBooks,
@@ -142,7 +143,7 @@ export type SyncPlan = {
 };
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
-const OUTPUT_SCHEMA_VERSION = 37;
+const OUTPUT_SCHEMA_VERSION = 39;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 
@@ -585,7 +586,9 @@ export async function buildSyncPlan(
     throw new Error("Missing required config: output.dir");
   }
 
-  const allBooks = readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath).filter(isSyncableBook);
+  const allBooks = await hydrateEpubPackageMetadata(
+    readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath).filter(isSyncableBook),
+  );
   const books = filterBooks(allBooks, options.bookFilter);
   const isFullSync = !options.bookFilter;
 
