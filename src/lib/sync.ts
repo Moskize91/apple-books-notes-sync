@@ -297,6 +297,13 @@ async function hasMissingExpectedCoverImage(outputDir: string, previous: SyncAss
   return !(await pathExists(path.join(outputDir, previous.coverImageRelativePath)));
 }
 
+async function hasMissingSnapshotCoverImage(outputDir: string, snapshot: BookSyncSnapshot): Promise<boolean> {
+  if (!snapshot.bookFileRelativePath || !snapshot.coverImageRelativePath) {
+    return false;
+  }
+  return !(await pathExists(path.join(outputDir, snapshot.coverImageRelativePath)));
+}
+
 async function writeFileAtomically(filePath: string, content: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp-${Date.now()}-${process.pid}`;
@@ -634,7 +641,6 @@ export async function buildSyncPlan(
         : toShortBookFileStem(snapshot.book.title),
       bookFileRelativePath: snapshot.bookFileRelativePath,
       pdfAssetDirRelativePath: snapshot.pdfAssetDirRelativePath,
-      coverImageRelativePath: snapshot.coverImageRelativePath,
     };
   }
 
@@ -684,7 +690,10 @@ export async function buildSyncPlan(
       continue;
     }
 
-    if (await hasMissingExpectedCoverImage(outputDir, previous)) {
+    if (
+      (await hasMissingExpectedCoverImage(outputDir, previous)) ||
+      (await hasMissingSnapshotCoverImage(outputDir, snapshot))
+    ) {
       changedSnapshots.push(snapshot);
       changed.push(toPlanBook(snapshot, "cover-assets-missing"));
       continue;
@@ -898,18 +907,23 @@ export async function runSync(config: CliConfig, paths: IBooksPaths, options: Sy
         }
 
         if (nextBookFileRelativePath && snapshot.coverImageRelativePath) {
-          stagedCoverImagePath = path.join(stagingRoot, snapshot.coverImageRelativePath);
-          const hasCover = await generateBookCover(
-            snapshot.book,
-            stagedCoverImagePath,
-            options.dryRun,
-            resolvedPdfRenderBackend,
-          );
-          if (hasCover) {
-            generatedCoverImageCount = 1;
+          const targetCoverImagePath = path.join(outputDir, snapshot.coverImageRelativePath);
+          if (await pathExists(targetCoverImagePath)) {
             nextCoverImageRelativePath = snapshot.coverImageRelativePath;
           } else {
-            nextCoverImageRelativePath = null;
+            stagedCoverImagePath = path.join(stagingRoot, snapshot.coverImageRelativePath);
+            const hasCover = await generateBookCover(
+              snapshot.book,
+              stagedCoverImagePath,
+              options.dryRun,
+              resolvedPdfRenderBackend,
+            );
+            if (hasCover) {
+              generatedCoverImageCount = options.dryRun ? 0 : 1;
+              nextCoverImageRelativePath = snapshot.coverImageRelativePath;
+            } else {
+              nextCoverImageRelativePath = null;
+            }
           }
         }
 
