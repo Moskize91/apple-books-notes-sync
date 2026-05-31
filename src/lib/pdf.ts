@@ -20,6 +20,8 @@ type ResolvedPdfRenderBackend = Exclude<PdfRenderBackend, "auto">;
 type PdfRendererAvailability = {
   mutool: boolean;
   poppler: boolean;
+  swift: boolean;
+  swiftRenderScript: boolean;
 };
 type PdfOverlayAnnotation = {
   marker: string | null;
@@ -542,11 +544,16 @@ function escapeXml(input: string): string {
 }
 
 function getRenderScriptPath(): string {
+  return findRenderScriptPath() ?? path.resolve(__dirname, "../tools/render_pdf_page.swift");
+}
+
+export function findRenderScriptPath(): string | null {
   const candidates = [
+    path.resolve(__dirname, "tools/render_pdf_page.swift"),
     path.resolve(__dirname, "../tools/render_pdf_page.swift"),
     path.resolve(__dirname, "../../tools/render_pdf_page.swift"),
   ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
 export function setPdfCommands(commands: Partial<typeof pdfCommands>): void {
@@ -576,6 +583,8 @@ export function detectPdfRendererAvailability(): PdfRendererAvailability {
   return {
     mutool: isCommandAvailable(pdfCommands.mutool),
     poppler: isCommandAvailable(pdfCommands.pdftocairo),
+    swift: isCommandAvailable(pdfCommands.swift),
+    swiftRenderScript: findRenderScriptPath() !== null,
   };
 }
 
@@ -590,6 +599,12 @@ export function resolvePdfRenderBackend(
     if (availability.poppler) {
       return "poppler";
     }
+    if (!availability.swift) {
+      throw new Error('PDF renderer "swift" is not available.');
+    }
+    if (!availability.swiftRenderScript) {
+      throw new Error('PDF renderer "swift" render script is missing from the plugin or package.');
+    }
     return "swift";
   }
 
@@ -599,6 +614,14 @@ export function resolvePdfRenderBackend(
 
   if (requested === "poppler" && !availability.poppler) {
     throw new Error('PDF renderer "poppler" is not available. Install with: brew install poppler');
+  }
+
+  if (requested === "swift" && !availability.swift) {
+    throw new Error('PDF renderer "swift" is not available.');
+  }
+
+  if (requested === "swift" && !availability.swiftRenderScript) {
+    throw new Error('PDF renderer "swift" render script is missing from the plugin or package.');
   }
 
   return requested;

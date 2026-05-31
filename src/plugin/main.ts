@@ -35,21 +35,21 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
 
     this.addCommand({
       id: "sync",
-      name: "Run absync sync",
+      name: "Sync",
       callback: () => {
         void this.runSyncCommand(false);
       },
     });
     this.addCommand({
       id: "preview-sync-plan",
-      name: "Run absync plan",
+      name: "Plan",
       callback: () => {
         void this.previewPlan();
       },
     });
     this.addCommand({
       id: "doctor",
-      name: "Run absync doctor",
+      name: "Doctor",
       callback: () => {
         void this.runDoctorCommand();
       },
@@ -328,14 +328,11 @@ class AppleBooksNotesSyncSettingTab extends PluginSettingTab {
           });
       });
 
-    new Setting(containerEl).setName("External commands").setHeading();
+    new Setting(containerEl).setName("External command").setHeading();
     this.addCommandSetting("sqlite3", "sqlite3");
-    this.addCommandSetting("swift", "swift");
-    this.addCommandSetting("mutool", "mutool");
-    this.addCommandSetting("pdftocairo", "pdftocairo");
   }
 
-  private addCommandSetting(key: keyof PluginSettings["commands"], label: string): void {
+  private addCommandSetting(key: "sqlite3", label: string): void {
     new Setting(this.containerEl)
       .setName(label)
       .setDesc(`Command or absolute path for ${label}.`)

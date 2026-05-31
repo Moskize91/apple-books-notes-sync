@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readBooks } from "./ibooks-data";
-import { detectPdfRendererAvailability, resolvePdfRenderBackend } from "./pdf";
+import { detectPdfRendererAvailability, findRenderScriptPath, resolvePdfRenderBackend } from "./pdf";
 import { sqliteVersion } from "./sqlite";
 import type { IBooksPaths, SyncConfig } from "./types";
 
@@ -55,6 +55,15 @@ function formatAppleBooksUnavailableDetail(): string {
 
 function isSyncableFormat(format: string): boolean {
   return format === "EPUB" || format === "PDF";
+}
+
+async function canLoadSharp(): Promise<boolean> {
+  try {
+    await import("sharp");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function runDoctor(
@@ -120,6 +129,23 @@ export async function runDoctor(
     detail: pdfRendererAvailability.poppler
       ? "pdftocairo found"
       : "not found (optional, install: brew install poppler)",
+  });
+  checks.push({
+    name: "swift available",
+    ok: pdfRendererAvailability.swift,
+    detail: pdfRendererAvailability.swift ? "swift found" : "not found (required if mutool/pdftocairo are unavailable)",
+  });
+  checks.push({
+    name: "Swift PDF render script",
+    ok: pdfRendererAvailability.swiftRenderScript,
+    detail: findRenderScriptPath() ?? "tools/render_pdf_page.swift not found",
+  });
+  checks.push({
+    name: "sharp available",
+    ok: true,
+    detail: (await canLoadSharp())
+      ? "sharp found"
+      : "not found (optional; cover resizing and PDF annotation overlays will be skipped)",
   });
 
   if (paths.epubInfoDbPath) {
