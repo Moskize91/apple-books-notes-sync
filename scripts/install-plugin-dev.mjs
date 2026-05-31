@@ -26,13 +26,13 @@ async function loadEnvFile(filePath) {
 }
 
 async function copyDir(source, target) {
-  await fs.rm(target, { recursive: true, force: true });
   await fs.mkdir(target, { recursive: true });
   const entries = await fs.readdir(source, { withFileTypes: true });
   for (const entry of entries) {
     const sourcePath = path.join(source, entry.name);
     const targetPath = path.join(target, entry.name);
     if (entry.isDirectory()) {
+      await fs.rm(targetPath, { recursive: true, force: true });
       await copyDir(sourcePath, targetPath);
     } else {
       await fs.copyFile(sourcePath, targetPath);

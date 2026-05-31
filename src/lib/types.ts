@@ -20,12 +20,6 @@ export type SyncConfig = {
   managedDirName: string;
   pdfBetaEnabled: boolean;
   pdfRenderBackend: PdfRenderBackend;
-  commands: {
-    sqlite3: string;
-    swift: string;
-    mutool: string;
-    pdftocairo: string;
-  };
 };
 
 export type CliConfig = SyncConfig;

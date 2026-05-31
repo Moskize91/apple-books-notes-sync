@@ -10,45 +10,20 @@ export type PluginSettings = {
   managedDirName: string;
   pdfBetaEnabled: boolean;
   pdfRenderBackend: PdfRenderBackend;
-  commands: {
-    sqlite3: string;
-    swift: string;
-    mutool: string;
-    pdftocairo: string;
-  };
 };
 
-type RawPluginSettings = Partial<
-  Omit<PluginSettings, "commands"> & {
-    commands: Partial<PluginSettings["commands"]>;
-  }
->;
+type RawPluginSettings = Partial<PluginSettings>;
 
 export function getDefaultPluginSettings(): PluginSettings {
   return {
     managedDirName: DEFAULT_MANAGED_DIR_NAME,
     pdfBetaEnabled: true,
     pdfRenderBackend: "auto",
-    commands: {
-      sqlite3: "sqlite3",
-      swift: "swift",
-      mutool: "mutool",
-      pdftocairo: "pdftocairo",
-    },
   };
-}
-
-function normalizeCommand(value: unknown, fallback: string): string {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : fallback;
 }
 
 export function normalizePluginSettings(raw: RawPluginSettings | null | undefined): PluginSettings {
   const defaults = getDefaultPluginSettings();
-  const commands = raw?.commands ?? {};
   const managedDirName =
     typeof raw?.managedDirName === "string" && raw.managedDirName.trim().length > 0
       ? raw.managedDirName
@@ -58,12 +33,6 @@ export function normalizePluginSettings(raw: RawPluginSettings | null | undefine
     managedDirName,
     pdfBetaEnabled: raw?.pdfBetaEnabled ?? defaults.pdfBetaEnabled,
     pdfRenderBackend: parsePdfRenderBackend(raw?.pdfRenderBackend, defaults.pdfRenderBackend),
-    commands: {
-      sqlite3: normalizeCommand(commands.sqlite3, defaults.commands.sqlite3),
-      swift: normalizeCommand(commands.swift, defaults.commands.swift),
-      mutool: normalizeCommand(commands.mutool, defaults.commands.mutool),
-      pdftocairo: normalizeCommand(commands.pdftocairo, defaults.commands.pdftocairo),
-    },
   };
 }
 
@@ -73,7 +42,6 @@ export function pluginSettingsToSyncConfig(vaultDir: string, settings: PluginSet
     managedDirName: settings.managedDirName,
     pdfBetaEnabled: settings.pdfBetaEnabled,
     pdfRenderBackend: settings.pdfRenderBackend,
-    commands: settings.commands,
   };
 }
 

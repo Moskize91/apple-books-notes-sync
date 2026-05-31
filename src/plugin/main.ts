@@ -327,22 +327,5 @@ class AppleBooksNotesSyncSettingTab extends PluginSettingTab {
             })();
           });
       });
-
-    new Setting(containerEl).setName("External command").setHeading();
-    this.addCommandSetting("sqlite3", "sqlite3");
-  }
-
-  private addCommandSetting(key: "sqlite3", label: string): void {
-    new Setting(this.containerEl)
-      .setName(label)
-      .setDesc(`Command or absolute path for ${label}.`)
-      .addText((text) => {
-        text.setValue(this.plugin.settings.commands[key]).onChange((value) => {
-          void (async () => {
-            this.plugin.settings.commands[key] = value.trim() || getDefaultPluginSettings().commands[key];
-            await this.plugin.saveSettings();
-          })();
-        });
-      });
   }
 }
