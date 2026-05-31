@@ -57,15 +57,6 @@ function isSyncableFormat(format: string): boolean {
   return format === "EPUB" || format === "PDF";
 }
 
-async function canLoadSharp(): Promise<boolean> {
-  try {
-    await import("sharp");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function runDoctor(
   paths: IBooksPaths,
   config: SyncConfig | null,
@@ -146,11 +137,16 @@ export async function runDoctor(
     detail: findPdfWorkerPath() ?? "vendor/pdf.worker.mjs not found",
   });
   checks.push({
-    name: "sharp available",
+    name: "sips available",
+    ok: pdfRendererAvailability.sips,
+    detail: pdfRendererAvailability.sips ? "sips found" : "not found (required for cover conversion and image resizing)",
+  });
+  checks.push({
+    name: "magick available",
     ok: true,
-    detail: (await canLoadSharp())
-      ? "sharp found"
-      : "not found (optional; cover resizing and PDF annotation overlays will be skipped)",
+    detail: pdfRendererAvailability.magick
+      ? "magick found"
+      : "not found (optional, install ImageMagick for PDF annotation overlays)",
   });
 
   if (paths.epubInfoDbPath) {

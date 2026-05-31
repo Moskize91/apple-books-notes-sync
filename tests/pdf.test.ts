@@ -123,6 +123,8 @@ test("resolvePdfRenderBackend uses mutool first in auto mode", () => {
     swift: true,
     swiftRenderScript: true,
     pdfWorker: true,
+    sips: true,
+    magick: true,
   });
   assert.equal(backend, "mutool");
 });
@@ -134,6 +136,8 @@ test("resolvePdfRenderBackend falls back to poppler then swift in auto mode", ()
     swift: true,
     swiftRenderScript: true,
     pdfWorker: true,
+    sips: true,
+    magick: true,
   });
   const swiftBackend = resolvePdfRenderBackend("auto", {
     mutool: false,
@@ -141,6 +145,8 @@ test("resolvePdfRenderBackend falls back to poppler then swift in auto mode", ()
     swift: true,
     swiftRenderScript: true,
     pdfWorker: true,
+    sips: true,
+    magick: true,
   });
   assert.equal(popplerBackend, "poppler");
   assert.equal(swiftBackend, "swift");
@@ -155,6 +161,8 @@ test("resolvePdfRenderBackend rejects unavailable explicit renderer", () => {
         swift: true,
         swiftRenderScript: true,
         pdfWorker: true,
+        sips: true,
+        magick: true,
       });
     },
     /brew install mupdf-tools/,
@@ -167,6 +175,8 @@ test("resolvePdfRenderBackend rejects unavailable explicit renderer", () => {
         swift: true,
         swiftRenderScript: true,
         pdfWorker: true,
+        sips: true,
+        magick: true,
       });
     },
     /brew install poppler/,
@@ -180,4 +190,6 @@ test("detectPdfRendererAvailability returns booleans", () => {
   assert.equal(typeof availability.swift, "boolean");
   assert.equal(typeof availability.swiftRenderScript, "boolean");
   assert.equal(typeof availability.pdfWorker, "boolean");
+  assert.equal(typeof availability.sips, "boolean");
+  assert.equal(typeof availability.magick, "boolean");
 });

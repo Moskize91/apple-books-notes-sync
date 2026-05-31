@@ -8,7 +8,7 @@ const builtins = new Set([
   ...module.builtinModules.map((name) => `node:${name}`),
 ]);
 const allowedExternal = new Set(["obsidian"]);
-const allowedOptionalExternal = new Set(["sharp"]);
+const allowedOptionalExternal = new Set();
 
 function isIdentifierChar(char) {
   return /[A-Za-z0-9_$]/.test(char);

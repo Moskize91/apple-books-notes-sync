@@ -6,7 +6,7 @@ export default defineConfig({
   entry: {
     main: "src/plugin/main.ts",
   },
-  external: ["obsidian", "sharp"],
+  external: ["obsidian"],
   noExternal: ["pdfjs-dist"],
   format: ["cjs"],
   outDir: "plugin-dist",

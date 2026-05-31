@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { hydrateEpubPackageMetadata } from "./book-metadata";
@@ -39,8 +40,6 @@ import type {
   SyncStats,
   SyncableBookFormat,
 } from "./types";
-
-type SharpFactory = typeof import("sharp");
 
 type SyncOptions = {
   dryRun: boolean;
@@ -147,25 +146,6 @@ const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
 const OUTPUT_SCHEMA_VERSION = 39;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
-let cachedSharpModule: SharpFactory | null = null;
-let didWarnMissingSharp = false;
-
-async function getSharpModule(): Promise<SharpFactory | null> {
-  if (cachedSharpModule) {
-    return cachedSharpModule;
-  }
-  try {
-    const module = await import("sharp");
-    cachedSharpModule = ((module as unknown as { default?: SharpFactory }).default ?? module) as SharpFactory;
-    return cachedSharpModule;
-  } catch {
-    if (!didWarnMissingSharp) {
-      didWarnMissingSharp = true;
-      log("warn", "sharp is unavailable; EPUB cover images will be skipped.");
-    }
-    return null;
-  }
-}
 
 async function pathExists(inputPath: string): Promise<boolean> {
   try {
@@ -455,21 +435,22 @@ async function generatePdfPages(
 }
 
 async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promise<boolean> {
-  const sharp = await getSharpModule();
-  if (!sharp) {
-    return false;
-  }
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await sharp(input)
-    .resize({
-      width: COVER_IMAGE_MAX_DIMENSION,
-      height: COVER_IMAGE_MAX_DIMENSION,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .png()
-    .toFile(outputPath);
-  return true;
+  const inputPath = `${outputPath}.source`;
+  try {
+    await fs.writeFile(inputPath, input);
+    execFileSync("sips", ["-s", "format", "png", "-Z", String(COVER_IMAGE_MAX_DIMENSION), inputPath, "--out", outputPath], {
+      encoding: "utf8",
+      stdio: "ignore",
+    });
+    return true;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    log("warn", `failed to generate EPUB cover with sips: ${message}`);
+    return false;
+  } finally {
+    await fs.rm(inputPath, { force: true });
+  }
 }
 
 async function generateBookCover(

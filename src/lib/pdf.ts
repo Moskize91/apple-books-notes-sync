@@ -15,7 +15,6 @@ type PdfJsAnnotation = {
 };
 
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
-type SharpFactory = typeof import("sharp");
 type ResolvedPdfRenderBackend = Exclude<PdfRenderBackend, "auto">;
 type PdfRendererAvailability = {
   mutool: boolean;
@@ -23,6 +22,8 @@ type PdfRendererAvailability = {
   swift: boolean;
   swiftRenderScript: boolean;
   pdfWorker: boolean;
+  sips: boolean;
+  magick: boolean;
 };
 type PdfOverlayAnnotation = {
   marker: string | null;
@@ -35,13 +36,13 @@ type PdfPageTextItem = {
 };
 
 let cachedPdfJsModule: PdfJsModule | null = null;
-let cachedSharpModule: SharpFactory | null = null;
-let didWarnMissingSharp = false;
 const cachedPdfCommandAvailability = new Map<string, boolean>();
 let pdfCommands = {
   swift: "swift",
   mutool: "mutool",
   pdftocairo: "pdftocairo",
+  sips: "sips",
+  magick: "magick",
   swiftRenderScriptPath: "",
   pdfWorkerPath: "",
 };
@@ -68,23 +69,6 @@ async function getPdfJsModule(): Promise<PdfJsModule> {
     cachedPdfJsModule.GlobalWorkerOptions.workerSrc = workerPath;
   }
   return cachedPdfJsModule;
-}
-
-async function getSharpModule(): Promise<SharpFactory | null> {
-  if (cachedSharpModule) {
-    return cachedSharpModule;
-  }
-  try {
-    const module = await import("sharp");
-    cachedSharpModule = ((module as unknown as { default?: SharpFactory }).default ?? module) as SharpFactory;
-    return cachedSharpModule;
-  } catch {
-    if (!didWarnMissingSharp) {
-      didWarnMissingSharp = true;
-      console.warn("[WARN] sharp is unavailable; skipping PNG resizing and PDF annotation overlays.");
-    }
-    return null;
-  }
 }
 
 function toRect(input: number[] | undefined): Rect | null {
@@ -613,6 +597,8 @@ export function detectPdfRendererAvailability(): PdfRendererAvailability {
     swift: isCommandAvailable(pdfCommands.swift),
     swiftRenderScript: findRenderScriptPath() !== null,
     pdfWorker: findPdfWorkerPath() !== null,
+    sips: isCommandAvailable(pdfCommands.sips),
+    magick: isCommandAvailable(pdfCommands.magick),
   };
 }
 
@@ -727,29 +713,13 @@ export function renderPdfCoverToPng(
 }
 
 export async function limitPngMaxDimension(imagePath: string, maxDimension: number): Promise<void> {
-  const sharp = await getSharpModule();
-  if (!sharp) {
+  if (!isCommandAvailable(pdfCommands.sips)) {
     return;
   }
-  const metadata = await sharp(imagePath).metadata();
-  if (!metadata.width || !metadata.height) {
-    return;
-  }
-  const longestSide = Math.max(metadata.width, metadata.height);
-  if (longestSide <= maxDimension) {
-    return;
-  }
-
-  const resized = await sharp(imagePath)
-    .resize({
-      width: maxDimension,
-      height: maxDimension,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .png()
-    .toBuffer();
-  await sharp(resized).toFile(imagePath);
+  execFileSync(pdfCommands.sips, ["-Z", String(maxDimension), imagePath], {
+    encoding: "utf8",
+    stdio: "ignore",
+  });
 }
 
 export function sortPdfAnnotations(annotations: PdfAnnotation[]): PdfAnnotation[] {
@@ -795,22 +765,33 @@ export async function overlayPdfAnnotationNumbers(
     return;
   }
 
-  const sharp = await getSharpModule();
-  if (!sharp) {
-    return;
-  }
-  const metadata = await sharp(imagePath).metadata();
-  if (!metadata.width || !metadata.height) {
+  if (!isCommandAvailable(pdfCommands.magick)) {
     return;
   }
 
-  const overlaySvg = toOverlaySvg(metadata.width, metadata.height, pageWidth, pageHeight, annotations);
-  const outputBuffer = await sharp(imagePath)
-    .composite([{ input: Buffer.from(overlaySvg), blend: "over" }])
-    .png()
-    .toBuffer();
+  const identify = execFileSync(pdfCommands.magick, ["identify", "-format", "%w %h", imagePath], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  }).trim();
+  const [width, height] = identify.split(/\s+/).map((value) => Number(value));
+  if (!width || !height) {
+    return;
+  }
 
-  await sharp(outputBuffer).toFile(imagePath);
+  const overlaySvg = toOverlaySvg(width, height, pageWidth, pageHeight, annotations);
+  const overlayPath = `${imagePath}.overlay.svg`;
+  const outputPath = `${imagePath}.overlay.png`;
+  try {
+    fs.writeFileSync(overlayPath, overlaySvg, "utf8");
+    execFileSync(pdfCommands.magick, [imagePath, overlayPath, "-compose", "over", "-composite", outputPath], {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    fs.renameSync(outputPath, imagePath);
+  } finally {
+    fs.rmSync(overlayPath, { force: true });
+    fs.rmSync(outputPath, { force: true });
+  }
 }
 
 export function pdfAnnotationLabel(annotation: PdfAnnotation): string {
