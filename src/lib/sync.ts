@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
 import { hydrateEpubPackageMetadata } from "./book-metadata";
 import {
   readAnnotationMaxModificationDates,
@@ -40,6 +39,8 @@ import type {
   SyncStats,
   SyncableBookFormat,
 } from "./types";
+
+type SharpFactory = typeof import("sharp");
 
 type SyncOptions = {
   dryRun: boolean;
@@ -146,6 +147,16 @@ const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
 const OUTPUT_SCHEMA_VERSION = 39;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
+let cachedSharpModule: SharpFactory | null = null;
+
+async function getSharpModule(): Promise<SharpFactory> {
+  if (cachedSharpModule) {
+    return cachedSharpModule;
+  }
+  const module = await import("sharp");
+  cachedSharpModule = ((module as unknown as { default?: SharpFactory }).default ?? module) as SharpFactory;
+  return cachedSharpModule;
+}
 
 async function pathExists(inputPath: string): Promise<boolean> {
   try {
@@ -444,6 +455,7 @@ async function hasRenderablePdfAnnotations(pdfPath: string): Promise<boolean> {
 }
 
 async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promise<void> {
+  const sharp = await getSharpModule();
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await sharp(input)
     .resize({

@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import sharp from "sharp";
 import type { PdfAnnotation, PdfPageAnnotations, PdfRenderBackend, Rect } from "./types";
 import { normalizeQuoteText } from "./quote-normalize";
 
@@ -16,6 +15,7 @@ type PdfJsAnnotation = {
 };
 
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
+type SharpFactory = typeof import("sharp");
 type ResolvedPdfRenderBackend = Exclude<PdfRenderBackend, "auto">;
 type PdfRendererAvailability = {
   mutool: boolean;
@@ -32,6 +32,7 @@ type PdfPageTextItem = {
 };
 
 let cachedPdfJsModule: PdfJsModule | null = null;
+let cachedSharpModule: SharpFactory | null = null;
 const cachedPdfCommandAvailability = new Map<string, boolean>();
 let pdfCommands = {
   swift: "swift",
@@ -57,6 +58,15 @@ async function getPdfJsModule(): Promise<PdfJsModule> {
 
   cachedPdfJsModule = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as PdfJsModule;
   return cachedPdfJsModule;
+}
+
+async function getSharpModule(): Promise<SharpFactory> {
+  if (cachedSharpModule) {
+    return cachedSharpModule;
+  }
+  const module = await import("sharp");
+  cachedSharpModule = ((module as unknown as { default?: SharpFactory }).default ?? module) as SharpFactory;
+  return cachedSharpModule;
 }
 
 function toRect(input: number[] | undefined): Rect | null {
@@ -657,6 +667,7 @@ export function renderPdfCoverToPng(
 }
 
 export async function limitPngMaxDimension(imagePath: string, maxDimension: number): Promise<void> {
+  const sharp = await getSharpModule();
   const metadata = await sharp(imagePath).metadata();
   if (!metadata.width || !metadata.height) {
     return;
@@ -721,6 +732,7 @@ export async function overlayPdfAnnotationNumbers(
     return;
   }
 
+  const sharp = await getSharpModule();
   const metadata = await sharp(imagePath).metadata();
   if (!metadata.width || !metadata.height) {
     return;

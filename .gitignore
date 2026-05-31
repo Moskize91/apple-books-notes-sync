@@ -141,5 +141,5 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 dist/
-lib/
-plugin-dist/
+/lib/
+/plugin-dist/
