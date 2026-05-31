@@ -1,11 +1,11 @@
 import type { Command } from "commander";
-import { loadValidatedConfig } from "../lib/config";
-import { resolveIbooksPaths } from "../lib/ibooks-paths";
 import { runSync } from "../lib/sync";
+import { loadCommandContext, printCommandError } from "./context";
 
 type SyncOptions = {
   dryRun?: boolean;
   book?: string;
+  vault?: string;
 };
 
 export function registerSyncCommand(program: Command): void {
@@ -14,6 +14,7 @@ export function registerSyncCommand(program: Command): void {
     .description("Run note synchronization")
     .addHelpCommand(false)
     .showHelpAfterError("(run `absync sync --help` for usage)")
+    .option("--vault <selector>", "target vault id, vault name, or path")
     .option("--dry-run", "preview changes without writing files")
     .option("--book <keyword>", "sync only books matching keyword, title, author, or asset id")
     .addHelpText(
@@ -24,11 +25,10 @@ What this does:
   and removes stale managed output when appropriate.
 
 Prerequisites:
-  output.dir must be configured and valid:
-    absync config set output.dir "/path/to/ObsidianVault"
+  Apple Books Notes Sync must be installed and enabled in the target vault.
 
 Output layout:
-  <output.dir>/<output.managedDirName>/
+  <vault>/<managedDirName>/
     index.md
     books/
       <book>.md
@@ -39,14 +39,12 @@ Output layout:
       <asset-id>/
 
 Write rules:
-  absync writes inside <output.dir>/<output.managedDirName>.
+  absync writes inside <vault>/<managedDirName>.
   A full sync may remove stale files that were previously managed by absync.
   A filtered sync with --book updates matching books only and does not process removals.
 
 PDF rendering:
-  Controlled by:
-    absync config set pdf.enabled true|false
-    absync config set pdf.renderer auto|swift|mutool|poppler
+  Controlled by the target vault's plugin settings.
 
 Recommended flow:
   absync plan
@@ -54,14 +52,14 @@ Recommended flow:
 
 Examples:
   absync sync
+  absync sync --vault "MyVault"
   absync sync --dry-run
   absync sync --book "Newton"
 `,
     )
     .action((options: SyncOptions) => {
       void (async () => {
-        const config = await loadValidatedConfig();
-        const paths = await resolveIbooksPaths();
+        const { config, paths } = await loadCommandContext(options);
         const syncOptions: { dryRun: boolean; bookFilter?: string } = {
           dryRun: Boolean(options.dryRun),
         };
@@ -77,12 +75,7 @@ Examples:
         );
         console.log(`output: ${result.outputDir}`);
       })().catch((error: unknown) => {
-        if (error instanceof Error) {
-          console.error(error.message);
-        } else {
-          console.error("sync failed");
-        }
-        process.exitCode = 1;
+        printCommandError(error, "sync failed");
       });
     });
 }

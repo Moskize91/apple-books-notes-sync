@@ -32,10 +32,10 @@ import {
 import { acquireSyncLock, buildBookSyncHash, readSyncState, writeSyncState } from "./sync-state";
 import type {
   Book,
-  CliConfig,
   EpubAnnotation,
   IBooksPaths,
   PdfRenderBackend,
+  SyncConfig,
   SyncAssetState,
   SyncStats,
   SyncableBookFormat,
@@ -578,21 +578,17 @@ function toRemovedPlanBook(asset: SyncAssetState): SyncPlanRemovedBook {
 }
 
 export async function buildSyncPlan(
-  config: CliConfig,
+  config: SyncConfig,
   paths: IBooksPaths,
   options: { bookFilter?: string | undefined },
 ): Promise<SyncPlan> {
-  if (!config.outputDir) {
-    throw new Error("Missing required config: output.dir");
-  }
-
   const allBooks = await hydrateEpubPackageMetadata(
     readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath).filter(isSyncableBook),
   );
   const books = filterBooks(allBooks, options.bookFilter);
   const isFullSync = !options.bookFilter;
 
-  const outputDir = path.resolve(config.outputDir, config.managedDirName);
+  const outputDir = path.resolve(config.vaultDir, config.managedDirName);
   const booksDirName = "books";
   const previousState = await readSyncState(outputDir);
   const nextStateAssets: Record<string, SyncAssetState> = { ...previousState.assets };
@@ -748,7 +744,7 @@ export async function buildSyncPlan(
   };
 }
 
-export async function runSync(config: CliConfig, paths: IBooksPaths, options: SyncOptions): Promise<SyncResult> {
+export async function runSync(config: SyncConfig, paths: IBooksPaths, options: SyncOptions): Promise<SyncResult> {
   const plan = await buildSyncPlan(config, paths, { bookFilter: options.bookFilter });
   const {
     outputDir,

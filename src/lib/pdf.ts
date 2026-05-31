@@ -33,6 +33,11 @@ type PdfPageTextItem = {
 
 let cachedPdfJsModule: PdfJsModule | null = null;
 const cachedPdfCommandAvailability = new Map<string, boolean>();
+let pdfCommands = {
+  swift: "swift",
+  mutool: "mutool",
+  pdftocairo: "pdftocairo",
+};
 const NON_TEXT_PDF_SUBTYPES = new Set([
   "sound",
   "popup",
@@ -525,6 +530,11 @@ function getRenderScriptPath(): string {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
 }
 
+export function setPdfCommands(commands: Partial<typeof pdfCommands>): void {
+  pdfCommands = { ...pdfCommands, ...commands };
+  cachedPdfCommandAvailability.clear();
+}
+
 function isCommandAvailable(command: string): boolean {
   const cached = cachedPdfCommandAvailability.get(command);
   if (cached !== undefined) {
@@ -545,8 +555,8 @@ function isCommandAvailable(command: string): boolean {
 
 export function detectPdfRendererAvailability(): PdfRendererAvailability {
   return {
-    mutool: isCommandAvailable("mutool"),
-    poppler: isCommandAvailable("pdftocairo"),
+    mutool: isCommandAvailable(pdfCommands.mutool),
+    poppler: isCommandAvailable(pdfCommands.pdftocairo),
   };
 }
 
@@ -576,7 +586,7 @@ export function resolvePdfRenderBackend(
 }
 
 function renderPdfPageToPngWithSwift(pdfPath: string, pageNumber: number, outputPath: string, scale: number): void {
-  execFileSync("swift", [getRenderScriptPath(), pdfPath, String(pageNumber), outputPath, String(scale)], {
+  execFileSync(pdfCommands.swift, [getRenderScriptPath(), pdfPath, String(pageNumber), outputPath, String(scale)], {
     encoding: "utf8",
     maxBuffer: 8 * 1024 * 1024,
   });
@@ -585,7 +595,7 @@ function renderPdfPageToPngWithSwift(pdfPath: string, pageNumber: number, output
 function renderPdfPageToPngWithMutool(pdfPath: string, pageNumber: number, outputPath: string, scale: number): void {
   const dpi = Math.max(36, Math.round(72 * scale));
   execFileSync(
-    "mutool",
+    pdfCommands.mutool,
     ["draw", "-q", "-F", "png", "-r", String(dpi), "-o", outputPath, pdfPath, String(pageNumber)],
     {
       encoding: "utf8",
@@ -598,7 +608,7 @@ function renderPdfPageToPngWithPoppler(pdfPath: string, pageNumber: number, outp
   const dpi = Math.max(36, Math.round(72 * scale));
   const outputBasePath = outputPath.toLowerCase().endsWith(".png") ? outputPath.slice(0, -4) : outputPath;
   execFileSync(
-    "pdftocairo",
+    pdfCommands.pdftocairo,
     [
       "-png",
       "-singlefile",

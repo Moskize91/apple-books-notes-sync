@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 
+let sqliteCommand = "sqlite3";
+
+export function setSqliteCommand(command: string): void {
+  sqliteCommand = command;
+}
+
 export function querySqlite<T>(dbPath: string, sql: string): T[] {
-  const output = execFileSync("sqlite3", ["-json", dbPath, sql], {
+  const output = execFileSync(sqliteCommand, ["-json", dbPath, sql], {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -14,7 +20,7 @@ export function querySqlite<T>(dbPath: string, sql: string): T[] {
 }
 
 export function sqliteVersion(): string {
-  return execFileSync("sqlite3", ["--version"], {
+  return execFileSync(sqliteCommand, ["--version"], {
     encoding: "utf8",
   }).trim();
 }

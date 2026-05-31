@@ -1,11 +1,11 @@
 import type { Command } from "commander";
-import { loadValidatedConfig } from "../lib/config";
-import { resolveIbooksPaths } from "../lib/ibooks-paths";
 import { buildSyncPlan, type SyncPlan, type SyncPlanBook, type SyncPlanRemovedBook } from "../lib/sync";
+import { loadCommandContext, printCommandError } from "./context";
 
 type PlanOptions = {
   book?: string;
   json?: boolean;
+  vault?: string;
 };
 
 function printBook(item: SyncPlanBook | SyncPlanRemovedBook): void {
@@ -54,18 +54,18 @@ export function registerPlanCommand(program: Command): void {
     .description("Preview which books need synchronization")
     .addHelpCommand(false)
     .showHelpAfterError("(run `absync plan --help` for usage)")
+    .option("--vault <selector>", "target vault id, vault name, or path")
     .option("--book <keyword>", "plan only books matching keyword, title, author, or asset id")
     .option("--json", "print machine-readable JSON output")
     .addHelpText(
       "after",
       `
 What this does:
-  Reads the configured output state and Apple Books databases, then reports what
+  Reads the target vault plugin settings, output state, and Apple Books databases, then reports what
   absync sync would update or remove. It does not write files.
 
 Prerequisites:
-  output.dir must be configured and valid:
-    absync config set output.dir "/path/to/ObsidianVault"
+  Apple Books Notes Sync must be installed and enabled in the target vault.
 
 Output groups:
   Changed
@@ -108,14 +108,14 @@ Change reasons:
 
 Examples:
   absync plan
+  absync plan --vault "MyVault"
   absync plan --book "Newton"
   absync plan --json
 `,
     )
     .action((options: PlanOptions) => {
       void (async () => {
-        const config = await loadValidatedConfig();
-        const paths = await resolveIbooksPaths();
+        const { config, paths } = await loadCommandContext(options);
         const planOptions: { bookFilter?: string } = {};
         if (options.book) {
           planOptions.bookFilter = options.book;
@@ -141,12 +141,7 @@ Examples:
 
         printPlan(plan);
       })().catch((error: unknown) => {
-        if (error instanceof Error) {
-          console.error(error.message);
-        } else {
-          console.error("plan failed");
-        }
-        process.exitCode = 1;
+        printCommandError(error, "plan failed");
       });
     });
 }

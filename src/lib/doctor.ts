@@ -4,8 +4,7 @@ import path from "node:path";
 import { readBooks } from "./ibooks-data";
 import { detectPdfRendererAvailability, resolvePdfRenderBackend } from "./pdf";
 import { sqliteVersion } from "./sqlite";
-import type { ConfigValidationError } from "./config";
-import type { CliConfig, IBooksPaths } from "./types";
+import type { IBooksPaths, SyncConfig } from "./types";
 
 export type DoctorCheck = {
   name: string;
@@ -60,8 +59,8 @@ function isSyncableFormat(format: string): boolean {
 
 export async function runDoctor(
   paths: IBooksPaths,
-  config: CliConfig | null,
-  configError: ConfigValidationError | null = null,
+  config: SyncConfig | null,
+  configError: Error | null = null,
 ): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
 
@@ -169,14 +168,7 @@ export async function runDoctor(
   }
 
   if (config) {
-    if (!config.outputDir) {
-      checks.push({
-        name: "config",
-        ok: false,
-        detail: "Missing required config: output.dir Run: absync config set output.dir <path-to-obsidian-vault>",
-      });
-    } else {
-    const managedOutput = path.join(config.outputDir, config.managedDirName);
+    const managedOutput = path.join(config.vaultDir, config.managedDirName);
     const writable = await canWriteDir(managedOutput);
     checks.push({
       name: "output directory writable",
@@ -197,7 +189,6 @@ export async function runDoctor(
         ok: false,
         detail: error instanceof Error ? error.message : "invalid renderer configuration",
       });
-    }
     }
   } else if (configError) {
     checks.push({
