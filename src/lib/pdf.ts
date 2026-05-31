@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import type { PdfAnnotation, PdfPageAnnotations, PdfRenderBackend, Rect } from "./types";
 import { normalizeQuoteText } from "./quote-normalize";
@@ -280,8 +281,9 @@ async function readPdfPageTextItems(page: {
 
 export async function extractPdfPageAnnotations(pdfPath: string): Promise<PdfPageAnnotations[]> {
   const pdfjs = await getPdfJsModule();
+  const pdfData = await fsPromises.readFile(pdfPath);
   const loadingTask = pdfjs.getDocument({
-    url: pdfPath,
+    data: new Uint8Array(pdfData),
     disableWorker: true,
     isEvalSupported: false,
     useSystemFonts: true,
