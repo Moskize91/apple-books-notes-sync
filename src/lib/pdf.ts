@@ -41,6 +41,7 @@ let pdfCommands = {
   swift: "swift",
   mutool: "mutool",
   pdftocairo: "pdftocairo",
+  swiftRenderScriptPath: "",
 };
 const NON_TEXT_PDF_SUBTYPES = new Set([
   "sound",
@@ -548,6 +549,10 @@ function getRenderScriptPath(): string {
 }
 
 export function findRenderScriptPath(): string | null {
+  if (pdfCommands.swiftRenderScriptPath && fs.existsSync(pdfCommands.swiftRenderScriptPath)) {
+    return pdfCommands.swiftRenderScriptPath;
+  }
+
   const candidates = [
     path.resolve(__dirname, "tools/render_pdf_page.swift"),
     path.resolve(__dirname, "../tools/render_pdf_page.swift"),
