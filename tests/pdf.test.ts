@@ -122,7 +122,6 @@ test("resolvePdfRenderBackend uses mutool first in auto mode", () => {
     poppler: true,
     swift: true,
     swiftRenderScript: true,
-    pdfWorker: true,
     sips: true,
     magick: true,
   });
@@ -135,7 +134,6 @@ test("resolvePdfRenderBackend falls back to poppler then swift in auto mode", ()
     poppler: true,
     swift: true,
     swiftRenderScript: true,
-    pdfWorker: true,
     sips: true,
     magick: true,
   });
@@ -144,7 +142,6 @@ test("resolvePdfRenderBackend falls back to poppler then swift in auto mode", ()
     poppler: false,
     swift: true,
     swiftRenderScript: true,
-    pdfWorker: true,
     sips: true,
     magick: true,
   });
@@ -160,7 +157,6 @@ test("resolvePdfRenderBackend rejects unavailable explicit renderer", () => {
         poppler: true,
         swift: true,
         swiftRenderScript: true,
-        pdfWorker: true,
         sips: true,
         magick: true,
       });
@@ -174,7 +170,6 @@ test("resolvePdfRenderBackend rejects unavailable explicit renderer", () => {
         poppler: false,
         swift: true,
         swiftRenderScript: true,
-        pdfWorker: true,
         sips: true,
         magick: true,
       });
@@ -189,7 +184,6 @@ test("detectPdfRendererAvailability returns booleans", () => {
   assert.equal(typeof availability.poppler, "boolean");
   assert.equal(typeof availability.swift, "boolean");
   assert.equal(typeof availability.swiftRenderScript, "boolean");
-  assert.equal(typeof availability.pdfWorker, "boolean");
   assert.equal(typeof availability.sips, "boolean");
   assert.equal(typeof availability.magick, "boolean");
 });

@@ -22,7 +22,6 @@ type PdfRendererAvailability = {
   poppler: boolean;
   swift: boolean;
   swiftRenderScript: boolean;
-  pdfWorker: boolean;
   sips: boolean;
   magick: boolean;
 };
@@ -45,7 +44,6 @@ let pdfCommands = {
   sips: "sips",
   magick: "magick",
   swiftRenderScriptPath: "",
-  pdfWorkerPath: "",
 };
 const NON_TEXT_PDF_SUBTYPES = new Set([
   "sound",
@@ -65,10 +63,6 @@ async function getPdfJsModule(): Promise<PdfJsModule> {
   }
 
   cachedPdfJsModule = (await import("pdfjs-dist/legacy/build/pdf.mjs")) as PdfJsModule;
-  const workerPath = findPdfWorkerPath();
-  if (workerPath) {
-    cachedPdfJsModule.GlobalWorkerOptions.workerSrc = workerPath;
-  }
   return cachedPdfJsModule;
 }
 
@@ -553,22 +547,6 @@ export function findRenderScriptPath(): string | null {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
-export function findPdfWorkerPath(): string | null {
-  if (pdfCommands.pdfWorkerPath && fs.existsSync(pdfCommands.pdfWorkerPath)) {
-    return pdfCommands.pdfWorkerPath;
-  }
-
-  const candidates = [
-    path.resolve(__dirname, "vendor/pdf.worker.mjs"),
-    path.resolve(__dirname, "../vendor/pdf.worker.mjs"),
-    path.resolve(__dirname, "../../vendor/pdf.worker.mjs"),
-    path.resolve(__dirname, "pdf.worker.mjs"),
-    path.resolve(__dirname, "../pdf.worker.mjs"),
-    path.resolve(__dirname, "../../pdf.worker.mjs"),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
-}
-
 export function setPdfCommands(commands: Partial<typeof pdfCommands>): void {
   pdfCommands = { ...pdfCommands, ...commands };
   cachedPdfCommandAvailability.clear();
@@ -598,7 +576,6 @@ export function detectPdfRendererAvailability(): PdfRendererAvailability {
     poppler: isCommandAvailable(pdfCommands.pdftocairo),
     swift: isCommandAvailable(pdfCommands.swift),
     swiftRenderScript: findRenderScriptPath() !== null,
-    pdfWorker: findPdfWorkerPath() !== null,
     sips: isCommandAvailable(pdfCommands.sips),
     magick: isCommandAvailable(pdfCommands.magick),
   };

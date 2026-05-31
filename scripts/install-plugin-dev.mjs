@@ -40,6 +40,17 @@ async function copyDir(source, target) {
   }
 }
 
+async function cleanTarget(target) {
+  await fs.mkdir(target, { recursive: true });
+  const entries = await fs.readdir(target, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === "data.json" || entry.name === "logs") {
+      continue;
+    }
+    await fs.rm(path.join(target, entry.name), { recursive: true, force: true });
+  }
+}
+
 await loadEnvFile(path.resolve(".env.local"));
 
 const vault = process.env.OBSIDIAN_DEV_VAULT;
@@ -49,5 +60,6 @@ if (!vault) {
 }
 
 const target = path.join(vault, ".obsidian", "plugins", pluginId);
+await cleanTarget(target);
 await copyDir(path.resolve("plugin-dist"), target);
 console.log(`Installed plugin build to ${target}`);

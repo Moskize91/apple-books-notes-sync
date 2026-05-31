@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import "pdfjs-dist/legacy/build/pdf.worker.mjs";
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { runDoctor } from "../lib/doctor";
 import { resolveIbooksPaths } from "../lib/ibooks-paths";

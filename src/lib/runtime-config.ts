@@ -6,6 +6,5 @@ import type { SyncConfig } from "./types";
 export function applyRuntimeCommands(config: SyncConfig): void {
   setPdfCommands({
     swiftRenderScriptPath: path.join(getPluginDir(config.vaultDir), "tools", "render_pdf_page.swift"),
-    pdfWorkerPath: path.join(getPluginDir(config.vaultDir), "vendor", "pdf.worker.mjs"),
   });
 }
