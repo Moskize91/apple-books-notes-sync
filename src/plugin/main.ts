@@ -21,6 +21,10 @@ type PluginCommandResult = {
   details: string;
 };
 
+type VisibleCommandOptions = {
+  reportDialogOnSuccess: boolean;
+};
+
 export default class AppleBooksNotesSyncPlugin extends Plugin {
   settings: PluginSettings = getDefaultPluginSettings();
   private commandRunning = false;
@@ -105,7 +109,7 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
           `Summary: total=${result.stats.totalBooks}, success=${result.stats.successBooks}, failed=${result.stats.failedBooks}, skipped=${result.stats.skippedBooks}, files=${result.stats.generatedFiles}`,
         ].join("\n"),
       };
-    });
+    }, { reportDialogOnSuccess: false });
   }
 
   private async runDoctorCommand(): Promise<void> {
@@ -129,7 +133,11 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
     });
   }
 
-  private async runVisibleCommand(command: string, action: () => Promise<PluginCommandResult>): Promise<void> {
+  private async runVisibleCommand(
+    command: string,
+    action: () => Promise<PluginCommandResult>,
+    options: VisibleCommandOptions = { reportDialogOnSuccess: true },
+  ): Promise<void> {
     if (this.commandRunning) {
       new Notice("Apple Books Notes Sync: another absync command is still running.", 8000);
       return;
@@ -152,7 +160,9 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
       const title = `Apple Books Notes Sync: ${command}`;
       const details = `${lines.join("\n")}\n\nLog file: ${logPath}`;
       new Notice(`Apple Books Notes Sync: ${command} ${result.notice}`, result.status === "warning" ? 20000 : 10000);
-      new CommandResultModal(this.app, title, details).open();
+      if (options.reportDialogOnSuccess || result.status === "warning") {
+        new CommandResultModal(this.app, title, details).open();
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error && error.stack ? error.stack : message;
