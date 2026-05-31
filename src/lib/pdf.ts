@@ -33,6 +33,7 @@ type PdfPageTextItem = {
 
 let cachedPdfJsModule: PdfJsModule | null = null;
 let cachedSharpModule: SharpFactory | null = null;
+let didWarnMissingSharp = false;
 const cachedPdfCommandAvailability = new Map<string, boolean>();
 let pdfCommands = {
   swift: "swift",
@@ -60,13 +61,21 @@ async function getPdfJsModule(): Promise<PdfJsModule> {
   return cachedPdfJsModule;
 }
 
-async function getSharpModule(): Promise<SharpFactory> {
+async function getSharpModule(): Promise<SharpFactory | null> {
   if (cachedSharpModule) {
     return cachedSharpModule;
   }
-  const module = await import("sharp");
-  cachedSharpModule = ((module as unknown as { default?: SharpFactory }).default ?? module) as SharpFactory;
-  return cachedSharpModule;
+  try {
+    const module = await import("sharp");
+    cachedSharpModule = ((module as unknown as { default?: SharpFactory }).default ?? module) as SharpFactory;
+    return cachedSharpModule;
+  } catch {
+    if (!didWarnMissingSharp) {
+      didWarnMissingSharp = true;
+      console.warn("[WARN] sharp is unavailable; skipping PNG resizing and PDF annotation overlays.");
+    }
+    return null;
+  }
 }
 
 function toRect(input: number[] | undefined): Rect | null {
@@ -668,6 +677,9 @@ export function renderPdfCoverToPng(
 
 export async function limitPngMaxDimension(imagePath: string, maxDimension: number): Promise<void> {
   const sharp = await getSharpModule();
+  if (!sharp) {
+    return;
+  }
   const metadata = await sharp(imagePath).metadata();
   if (!metadata.width || !metadata.height) {
     return;
@@ -733,6 +745,9 @@ export async function overlayPdfAnnotationNumbers(
   }
 
   const sharp = await getSharpModule();
+  if (!sharp) {
+    return;
+  }
   const metadata = await sharp(imagePath).metadata();
   if (!metadata.width || !metadata.height) {
     return;

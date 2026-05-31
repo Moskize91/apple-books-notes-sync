@@ -148,14 +148,23 @@ const OUTPUT_SCHEMA_VERSION = 39;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 let cachedSharpModule: SharpFactory | null = null;
+let didWarnMissingSharp = false;
 
-async function getSharpModule(): Promise<SharpFactory> {
+async function getSharpModule(): Promise<SharpFactory | null> {
   if (cachedSharpModule) {
     return cachedSharpModule;
   }
-  const module = await import("sharp");
-  cachedSharpModule = ((module as unknown as { default?: SharpFactory }).default ?? module) as SharpFactory;
-  return cachedSharpModule;
+  try {
+    const module = await import("sharp");
+    cachedSharpModule = ((module as unknown as { default?: SharpFactory }).default ?? module) as SharpFactory;
+    return cachedSharpModule;
+  } catch {
+    if (!didWarnMissingSharp) {
+      didWarnMissingSharp = true;
+      log("warn", "sharp is unavailable; EPUB cover images will be skipped.");
+    }
+    return null;
+  }
 }
 
 async function pathExists(inputPath: string): Promise<boolean> {
@@ -445,17 +454,11 @@ async function generatePdfPages(
   return items;
 }
 
-async function hasRenderablePdfAnnotations(pdfPath: string): Promise<boolean> {
-  const pages = await extractPdfPageAnnotations(pdfPath);
-  return pages.some((page) => {
-    return page.annotations.some((annotation) => {
-      return extractPdfQuoteContent(annotation).length > 0 || extractPdfUserNoteContent(annotation).length > 0;
-    });
-  });
-}
-
-async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promise<void> {
+async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promise<boolean> {
   const sharp = await getSharpModule();
+  if (!sharp) {
+    return false;
+  }
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await sharp(input)
     .resize({
@@ -466,6 +469,7 @@ async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promi
     })
     .png()
     .toFile(outputPath);
+  return true;
 }
 
 async function generateBookCover(
@@ -484,7 +488,7 @@ async function generateBookCover(
       return false;
     }
     if (!dryRun) {
-      await writeCoverPngFromBuffer(coverBuffer, coverImageAbsolutePath);
+      return writeCoverPngFromBuffer(coverBuffer, coverImageAbsolutePath);
     }
     return true;
   }
@@ -547,10 +551,8 @@ async function buildBookFingerprint(
       (epubRenderableCounts.get(book.assetId) ?? 0) > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
   } else if (previous && previous.hash === hash) {
     shouldHaveOutput = previous.bookFileRelativePath !== null;
-  } else if (!book.path) {
-    shouldHaveOutput = false;
   } else {
-    shouldHaveOutput = await hasRenderablePdfAnnotations(book.path);
+    shouldHaveOutput = book.annotationCount > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
   }
 
   return {

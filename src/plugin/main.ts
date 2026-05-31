@@ -51,6 +51,11 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
 
   private getVaultDir(): string {
     const adapter = this.app.vault.adapter;
+    const getBasePath =
+      "getBasePath" in adapter ? (adapter as { getBasePath?: unknown }).getBasePath : null;
+    if (typeof getBasePath === "function") {
+      return getBasePath.call(adapter) as string;
+    }
     const basePath = "basePath" in adapter ? (adapter as { basePath?: unknown }).basePath : null;
     if (typeof basePath !== "string" || basePath.length === 0) {
       throw new Error("Apple Books Notes Sync requires Obsidian desktop with a local filesystem vault.");
