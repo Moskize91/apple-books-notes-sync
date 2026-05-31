@@ -18,7 +18,7 @@
     "build:cli": "tsup --config tsup.cli.config.ts",
     "build:plugin": "tsup --config tsup.plugin.config.ts",
     "check:plugin-bundle": "node scripts/check-plugin-bundle.mjs",
-    "prepare:plugin": "npm run build:plugin && npm run check:plugin-bundle && cp manifest.json plugin-dist/manifest.json && rm -rf plugin-dist/tools && mkdir -p plugin-dist/tools && cp tools/render_pdf_page.swift plugin-dist/tools/render_pdf_page.swift && if [ -f styles.css ]; then cp styles.css plugin-dist/styles.css; fi",
+    "prepare:plugin": "npm run build:plugin && npm run check:plugin-bundle && cp manifest.json plugin-dist/manifest.json && rm -rf plugin-dist/tools plugin-dist/vendor && mkdir -p plugin-dist/tools plugin-dist/vendor && cp tools/render_pdf_page.swift plugin-dist/tools/render_pdf_page.swift && cp node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs plugin-dist/vendor/pdf.worker.mjs && if [ -f styles.css ]; then cp styles.css plugin-dist/styles.css; fi",
     "dev:plugin:install": "npm run prepare:plugin && node scripts/install-plugin-dev.mjs",
     "start": "node lib/cli.js",
     "test": "tsx --test tests/*.test.ts",

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readBooks } from "./ibooks-data";
-import { detectPdfRendererAvailability, findRenderScriptPath, resolvePdfRenderBackend } from "./pdf";
+import { detectPdfRendererAvailability, findPdfWorkerPath, findRenderScriptPath, resolvePdfRenderBackend } from "./pdf";
 import { sqliteVersion } from "./sqlite";
 import type { IBooksPaths, SyncConfig } from "./types";
 
@@ -139,6 +139,11 @@ export async function runDoctor(
     name: "Swift PDF render script",
     ok: pdfRendererAvailability.swiftRenderScript,
     detail: findRenderScriptPath() ?? "tools/render_pdf_page.swift not found",
+  });
+  checks.push({
+    name: "pdf.js worker",
+    ok: pdfRendererAvailability.pdfWorker,
+    detail: findPdfWorkerPath() ?? "vendor/pdf.worker.mjs not found",
   });
   checks.push({
     name: "sharp available",
