@@ -20,21 +20,21 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
 
     this.addCommand({
       id: "sync",
-      name: "Sync Apple Books notes",
+      name: "Run absync sync",
       callback: () => {
         void this.runSyncCommand(false);
       },
     });
     this.addCommand({
       id: "preview-sync-plan",
-      name: "Preview sync plan",
+      name: "Run absync plan",
       callback: () => {
         void this.previewPlan();
       },
     });
     this.addCommand({
       id: "doctor",
-      name: "Run doctor",
+      name: "Run absync doctor",
       callback: () => {
         void this.runDoctorCommand();
       },
@@ -70,40 +70,52 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
   }
 
   private async previewPlan(): Promise<void> {
+    new Notice("Apple Books Notes Sync: previewing sync plan...", 4000);
     try {
       const config = this.getSyncConfig();
       const plan = await buildSyncPlan(config, await resolveIbooksPaths(), {});
       new Notice(
         `Apple Books plan: ${plan.stats.changedBooks} changed, ${plan.stats.unchangedBooks} unchanged, ${plan.stats.removedBooks} removed.`,
+        10000,
       );
     } catch (error: unknown) {
-      new Notice(error instanceof Error ? error.message : "Apple Books plan failed.");
+      this.reportError("Preview sync plan failed", error);
     }
   }
 
   private async runSyncCommand(dryRun: boolean): Promise<void> {
+    new Notice("Apple Books Notes Sync: syncing Apple Books notes...", 4000);
     try {
       const result = await runSync(this.getSyncConfig(), await resolveIbooksPaths(), { dryRun });
       new Notice(
-        `Apple Books sync: ${result.stats.successBooks} success, ${result.stats.failedBooks} failed, ${result.stats.generatedFiles} files.`,
+        `Apple Books sync: ${result.stats.successBooks} success, ${result.stats.failedBooks} failed, ${result.stats.generatedFiles} files. Output: ${result.outputDir}`,
+        result.stats.failedBooks > 0 ? 15000 : 10000,
       );
     } catch (error: unknown) {
-      new Notice(error instanceof Error ? error.message : "Apple Books sync failed.");
+      this.reportError("Sync Apple Books notes failed", error);
     }
   }
 
   private async runDoctorCommand(): Promise<void> {
+    new Notice("Apple Books Notes Sync: running doctor...", 4000);
     try {
       const report = await runDoctor(await resolveIbooksPaths(), this.getSyncConfig(), null);
       const failed = report.checks.filter((check) => !check.ok);
       new Notice(
         failed.length === 0
           ? `Apple Books doctor passed. Syncable books: ${report.summary.books}.`
-          : `Apple Books doctor found ${failed.length} issue(s). First: ${failed[0]?.name}.`,
+          : `Apple Books doctor found ${failed.length} issue(s). First: ${failed[0]?.name}: ${failed[0]?.detail}`,
+        failed.length === 0 ? 10000 : 15000,
       );
     } catch (error: unknown) {
-      new Notice(error instanceof Error ? error.message : "Apple Books doctor failed.");
+      this.reportError("Run doctor failed", error);
     }
+  }
+
+  private reportError(action: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Apple Books Notes Sync] ${action}`, error);
+    new Notice(`Apple Books Notes Sync: ${action}. ${message}`, 20000);
   }
 }
 
