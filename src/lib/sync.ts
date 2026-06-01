@@ -272,16 +272,6 @@ export function hasRenderablePdfPageAnnotations(pages: PdfPageAnnotations[]): bo
   return false;
 }
 
-async function hasRenderablePdfFileAnnotations(pdfPath: string): Promise<boolean> {
-  try {
-    return hasRenderablePdfPageAnnotations(await extractPdfPageAnnotations(pdfPath));
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "unknown error";
-    log("warn", `failed to inspect PDF annotations: ${message}`);
-    return false;
-  }
-}
-
 function toSyncStateAsset(
   snapshot: BookSyncSnapshot,
   bookFileRelativePath: string | null,
@@ -589,14 +579,11 @@ async function buildBookFingerprint(
   if (book.format === "EPUB") {
     shouldHaveOutput =
       (epubRenderableCounts.get(book.assetId) ?? 0) > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
-  } else if (previous && previous.hash === hash) {
-    shouldHaveOutput =
-      previous.bookFileRelativePath !== null ||
-      (pdfBetaEnabled && Boolean(book.path) && (await hasRenderablePdfFileAnnotations(book.path!)));
   } else {
-    shouldHaveOutput =
-      Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath) ||
-      (pdfBetaEnabled && Boolean(book.path) && (await hasRenderablePdfFileAnnotations(book.path!)));
+    shouldHaveOutput = Boolean(
+      previous?.bookFileRelativePath ||
+        (pdfBetaEnabled && book.path && (!previous || previous.hash !== hash)),
+    );
   }
 
   return {
