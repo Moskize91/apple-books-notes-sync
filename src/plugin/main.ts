@@ -149,6 +149,9 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new AppleBooksNotesSyncSettingTab(this.app, this));
+    this.addRibbonIcon("book-open-check", "Sync Apple Books notes", () => {
+      void this.runSyncCommand(false);
+    });
 
     this.addCommand({
       id: "sync",
