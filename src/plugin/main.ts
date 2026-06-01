@@ -27,6 +27,12 @@ type SpawnResult = {
   stderr: string;
 };
 
+type ProcessOptions = {
+  timeoutMs?: number;
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
+};
+
 type ResolvedCli = {
   command: string;
   version: string;
@@ -80,9 +86,65 @@ type CliJsonResult<T> = {
   stderr: string;
 };
 
+type CliProgressEvent =
+  | {
+      type: "plan";
+      totalBooks: number;
+      changedBooks: number;
+      unchangedBooks: number;
+      removedBooks: number;
+    }
+  | {
+      type: "book";
+      phase: "dry-run preparing" | "syncing";
+      index: number;
+      total: number;
+      title: string;
+      format: SyncableBookFormat;
+    }
+  | {
+      type: "warning";
+      title: string;
+      message: string;
+    }
+  | {
+      type: "complete";
+      successBooks: number;
+      failedBooks: number;
+      skippedBooks: number;
+      generatedFiles: number;
+    }
+  | {
+      type: "log";
+      level: string;
+      message: string;
+    }
+  | {
+      type: "error";
+      message: string;
+    };
+
+type CliResolutionFailure = {
+  checked: string[];
+  configuredPath: string | null;
+  incompatibleError: string | null;
+};
+
+class CliResolutionError extends Error {
+  constructor(
+    message: string,
+    readonly failure: CliResolutionFailure,
+  ) {
+    super(message);
+    this.name = "CliResolutionError";
+  }
+}
+
 export default class AppleBooksNotesSyncPlugin extends Plugin {
   settings: PluginSettings = getDefaultPluginSettings();
   private commandRunning = false;
+  private statusBarEl: HTMLElement | null = null;
+  private statusClearTimer: ReturnType<typeof setTimeout> | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -157,11 +219,16 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
 
   private async runSyncCommand(dryRun: boolean): Promise<void> {
     await this.runVisibleCommand(dryRun ? "absync sync --dry-run" : "absync sync", async () => {
-      const args = ["sync", "--vault", this.getSyncConfig().vaultDir, "--json"];
+      this.updateStatusBar(dryRun ? "ABS dry-run starting..." : "ABS sync starting...");
+      const args = ["sync", "--vault", this.getSyncConfig().vaultDir, "--json", "--progress", "jsonl"];
       if (dryRun) {
         args.push("--dry-run");
       }
-      const { data: result, cli, stderr } = await this.runAbsyncJson<CliSyncResult>("sync", args);
+      const { data: result, cli, stderr } = await this.runAbsyncJson<CliSyncResult>("sync", args, {
+        onProgress: (event) => {
+          this.handleSyncProgress(event, dryRun);
+        },
+      });
       return {
         status: result.summary.failedBooks > 0 ? "warning" : "success",
         notice: `${result.summary.successBooks} success, ${result.summary.failedBooks} failed, ${result.summary.generatedFiles} files.`,
@@ -205,9 +272,18 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
     });
   }
 
-  private async runAbsyncJson<T>(label: string, args: string[]): Promise<CliJsonResult<T>> {
+  private async runAbsyncJson<T>(
+    label: string,
+    args: string[],
+    options: { onProgress?: (event: CliProgressEvent) => void } = {},
+  ): Promise<CliJsonResult<T>> {
     const cli = await this.resolveAbsyncCli();
-    const result = await this.runProcess(cli.command, args, this.getVaultDir());
+    const progressParser = options.onProgress ? this.createProgressParser(options.onProgress) : null;
+    const result = await this.runProcess(cli.command, args, this.getVaultDir(), {
+      onStderr: (chunk) => {
+        progressParser?.(chunk);
+      },
+    });
     if (result.exitCode !== 0) {
       throw new Error(
         [
@@ -243,24 +319,141 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
     return lines.join("\n");
   }
 
+  private createProgressParser(onProgress: (event: CliProgressEvent) => void): (chunk: string) => void {
+    let buffer = "";
+    return (chunk: string) => {
+      buffer += chunk;
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(trimmed) as CliProgressEvent;
+          if (typeof parsed.type === "string") {
+            onProgress(parsed);
+          }
+        } catch {
+          // Non-JSON stderr is still preserved for command logs.
+        }
+      }
+    };
+  }
+
+  private handleSyncProgress(event: CliProgressEvent, dryRun: boolean): void {
+    if (event.type === "plan") {
+      const action = dryRun ? "dry-run" : "sync";
+      this.updateStatusBar(`ABS ${action}: 0/${event.changedBooks} planned`);
+      return;
+    }
+    if (event.type === "book") {
+      const title = event.title.length > 36 ? `${event.title.slice(0, 35)}...` : event.title;
+      const action = dryRun ? "dry-run" : "sync";
+      this.updateStatusBar(`ABS ${action}: ${event.index}/${event.total} ${title}`);
+      return;
+    }
+    if (event.type === "warning") {
+      this.updateStatusBar(`ABS warning: ${event.title}`);
+      return;
+    }
+    if (event.type === "complete") {
+      this.updateStatusBar(`ABS done: ${event.successBooks} ok, ${event.failedBooks} failed`);
+      return;
+    }
+    if (event.type === "error") {
+      this.updateStatusBar("ABS failed");
+    }
+  }
+
+  private updateStatusBar(text: string): void {
+    if (this.statusClearTimer) {
+      clearTimeout(this.statusClearTimer);
+      this.statusClearTimer = null;
+    }
+    if (!this.statusBarEl) {
+      this.statusBarEl = this.addStatusBarItem();
+      this.statusBarEl.addClass("apple-books-notes-sync-status");
+    }
+    this.statusBarEl.setText(text);
+  }
+
+  private finishStatusBar(text: string): void {
+    this.updateStatusBar(text);
+    this.statusClearTimer = setTimeout(() => {
+      this.statusBarEl?.detach();
+      this.statusBarEl = null;
+      this.statusClearTimer = null;
+    }, 10000);
+  }
+
+  async detectAndSaveAbsyncCli(): Promise<boolean> {
+    new Notice("Apple Books Notes Sync: detecting absync CLI...", 4000);
+    try {
+      const cli = await this.detectAbsyncCli();
+      this.settings.absyncPath = cli.command;
+      await this.saveSettings();
+      new Notice(`Apple Books Notes Sync: absync CLI set to ${cli.command}`, 10000);
+      return true;
+    } catch (error: unknown) {
+      if (error instanceof CliResolutionError) {
+        new CliSetupModal(this.app, this.buildCliSetupDetails(error.failure)).open();
+        return false;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      new CommandResultModal(this.app, "Apple Books Notes Sync: absync CLI detection failed", message).open();
+      return false;
+    }
+  }
+
+  async testConfiguredAbsyncCli(): Promise<void> {
+    try {
+      const cli = await this.resolveAbsyncCli();
+      new Notice(`Apple Books Notes Sync: ✓ absync CLI works (${cli.version}).`, 8000);
+    } catch (error: unknown) {
+      if (error instanceof CliResolutionError) {
+        new CommandResultModal(
+          this.app,
+          "Apple Books Notes Sync: CLI path test failed",
+          [
+            "The configured absync CLI path did not work.",
+            "",
+            "Click Detect in this plugin's settings, or paste the path from Terminal:",
+            "  command -v absync",
+            ...(error.failure.configuredPath ? ["", `Configured path: ${error.failure.configuredPath}`] : []),
+          ].join("\n"),
+        ).open();
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      new CommandResultModal(this.app, "Apple Books Notes Sync: CLI path test failed", message).open();
+    }
+  }
+
   private async resolveAbsyncCli(): Promise<ResolvedCli> {
     const configured = this.settings.absyncPath?.trim();
-    if (configured) {
-      const command = this.expandHome(configured);
-      const resolved = await this.probeCli(command);
-      if (resolved) {
-        return resolved;
-      }
-      throw new Error(
-        [
-          `Configured absync CLI was not usable: ${command}`,
-          "Install or update the CLI with:",
-          "  npm install -g apple-books-notes-sync",
-          "Or clear the setting to let the plugin auto-detect absync.",
-        ].join("\n"),
-      );
+    if (!configured) {
+      throw new CliResolutionError("absync CLI path is required.", {
+        checked: [],
+        configuredPath: null,
+        incompatibleError: null,
+      });
     }
 
+    const command = this.expandHome(configured);
+    const resolved = await this.probeCli(command);
+    if (resolved) {
+      return resolved;
+    }
+    throw new CliResolutionError(`Configured absync CLI was not usable: ${command}`, {
+      checked: [command],
+      configuredPath: command,
+      incompatibleError: null,
+    });
+  }
+
+  private async detectAbsyncCli(): Promise<ResolvedCli> {
     const candidates = await this.getCliCandidates();
     let incompatibleCliError: Error | null = null;
     for (const candidate of candidates) {
@@ -276,19 +469,18 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
       }
     }
     if (incompatibleCliError) {
-      throw incompatibleCliError;
+      throw new CliResolutionError(incompatibleCliError.message, {
+        checked: candidates,
+        configuredPath: this.settings.absyncPath ? this.expandHome(this.settings.absyncPath) : null,
+        incompatibleError: incompatibleCliError.message,
+      });
     }
 
-    throw new Error(
-      [
-        "absync CLI was not found.",
-        "Install it with:",
-        "  npm install -g apple-books-notes-sync",
-        "If it is already installed, set the full absync path in this plugin's settings.",
-        "",
-        `Checked: ${candidates.join(", ")}`,
-      ].join("\n"),
-    );
+    throw new CliResolutionError("absync CLI was not found.", {
+      checked: candidates,
+      configuredPath: this.settings.absyncPath ? this.expandHome(this.settings.absyncPath) : null,
+      incompatibleError: null,
+    });
   }
 
   private async getCliCandidates(): Promise<string[]> {
@@ -299,19 +491,71 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
       path.join(os.homedir(), ".npm-global", "bin", "absync"),
       path.join(os.homedir(), ".local", "bin", "absync"),
     ];
-    const shellResolved = await this.resolveCliFromShell();
-    if (shellResolved) {
-      candidates.unshift(shellResolved);
-    }
+    candidates.unshift(...(await this.resolveCliCandidatesFromShell()));
+    candidates.push(...(await this.resolveCliCandidatesFromNpmPrefix()));
+    candidates.push(...(await this.resolveCliCandidatesFromNvm()));
     return [...new Set(candidates)];
   }
 
-  private async resolveCliFromShell(): Promise<string | null> {
-    const result = await this.runProcess("/bin/zsh", ["-lc", "command -v absync"], this.getVaultDir(), 5000);
+  private async resolveCliCandidatesFromShell(): Promise<string[]> {
+    const result = await this.runProcess(
+      "/bin/zsh",
+      ["-lc", "command -v absync; npm config get prefix 2>/dev/null"],
+      this.getVaultDir(),
+      5000,
+    );
     if (result.exitCode !== 0) {
-      return null;
+      return [];
     }
-    return result.stdout.split(/\r?\n/).find((line) => line.trim().length > 0)?.trim() ?? null;
+    const lines = result.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return lines.flatMap((line, index) => {
+      if (index === 0 && line.endsWith("/absync")) {
+        return [line];
+      }
+      if (line === "undefined" || line === "null") {
+        return [];
+      }
+      return [path.join(line, "bin", "absync")];
+    });
+  }
+
+  private async resolveCliCandidatesFromNpmPrefix(): Promise<string[]> {
+    const npmCandidates = [
+      "/opt/homebrew/bin/npm",
+      "/usr/local/bin/npm",
+    ];
+    const results: string[] = [];
+    for (const npmCommand of npmCandidates) {
+      if (npmCommand.endsWith("node")) {
+        continue;
+      }
+      const result = await this.runProcess(npmCommand, ["config", "get", "prefix"], this.getVaultDir(), 5000);
+      if (result.exitCode !== 0) {
+        continue;
+      }
+      const prefix = result.stdout.trim().split(/\r?\n/)[0];
+      if (prefix && prefix !== "undefined" && prefix !== "null") {
+        results.push(path.join(prefix, "bin", "absync"));
+      }
+    }
+    return results;
+  }
+
+  private async resolveCliCandidatesFromNvm(): Promise<string[]> {
+    const versionsDir = path.join(os.homedir(), ".nvm", "versions", "node");
+    try {
+      const entries = await fs.readdir(versionsDir, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(versionsDir, entry.name, "bin", "absync"))
+        .sort()
+        .reverse();
+    } catch {
+      return [];
+    }
   }
 
   private async probeCli(command: string): Promise<ResolvedCli | null> {
@@ -371,9 +615,16 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
     };
   }
 
-  private runProcess(command: string, args: string[], cwd: string, timeoutMs = 0): Promise<SpawnResult> {
+  private runProcess(
+    command: string,
+    args: string[],
+    cwd: string,
+    optionsOrTimeout: ProcessOptions | number = {},
+  ): Promise<SpawnResult> {
     return new Promise((resolve) => {
-      const env = this.buildProcessEnv();
+      const options: ProcessOptions =
+        typeof optionsOrTimeout === "number" ? { timeoutMs: optionsOrTimeout } : optionsOrTimeout;
+      const env = this.buildProcessEnv(command);
       const child = spawn(command, args, { cwd, env, windowsHide: true });
       let stdout = "";
       let stderr = "";
@@ -391,20 +642,22 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
         resolve(result);
       };
 
-      if (timeoutMs > 0) {
+      if ((options.timeoutMs ?? 0) > 0) {
         timeout = setTimeout(() => {
           child.kill();
-          finish({ exitCode: null, stdout, stderr: `${stderr}\nTimed out after ${timeoutMs}ms.`.trim() });
-        }, timeoutMs);
+          finish({ exitCode: null, stdout, stderr: `${stderr}\nTimed out after ${options.timeoutMs}ms.`.trim() });
+        }, options.timeoutMs);
       }
 
       child.stdout?.setEncoding("utf8");
       child.stderr?.setEncoding("utf8");
       child.stdout?.on("data", (chunk: string) => {
         stdout += chunk;
+        options.onStdout?.(chunk);
       });
       child.stderr?.on("data", (chunk: string) => {
         stderr += chunk;
+        options.onStderr?.(chunk);
       });
       child.on("error", (error) => {
         finish({ exitCode: null, stdout, stderr: error.message });
@@ -415,8 +668,9 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
     });
   }
 
-  private buildProcessEnv(): NodeJS.ProcessEnv {
+  private buildProcessEnv(command?: string): NodeJS.ProcessEnv {
     const commonPaths = [
+      ...(command && path.isAbsolute(command) ? [path.dirname(command)] : []),
       "/opt/homebrew/bin",
       "/usr/local/bin",
       "/usr/bin",
@@ -440,6 +694,30 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
     return input;
   }
 
+  private buildCliSetupDetails(failure: CliResolutionFailure | null): string {
+    return [
+      "Apple Books Notes Sync needs the absync command line tool.",
+      "",
+      "Install or update it from Terminal:",
+      "  npm install -g apple-books-notes-sync",
+      "",
+      "Find the installed path from Terminal:",
+      "  command -v absync",
+      "",
+      "Then either:",
+      "  1. Click Detect in this plugin's settings.",
+      "  2. Or paste the command output into absync CLI path.",
+      "",
+      "The absync CLI path setting is required before Plan, Sync, or Doctor can run.",
+      "",
+      "Common nvm path example:",
+      "  ~/.nvm/versions/node/<version>/bin/absync",
+      ...(failure?.configuredPath ? ["", `Configured path: ${failure.configuredPath}`] : []),
+      ...(failure?.incompatibleError ? ["", "Version issue:", failure.incompatibleError] : []),
+      ...(failure?.checked?.length ? ["", "Checked paths:", ...failure.checked.map((item) => `  ${item}`)] : []),
+    ].join("\n");
+  }
+
   private async runVisibleCommand(
     command: string,
     action: () => Promise<PluginCommandResult>,
@@ -461,6 +739,7 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
       const logPath = await this.safeWriteCommandLog(command, lines.join("\n"));
       const title = `Apple Books Notes Sync: ${command}`;
       const details = `${lines.join("\n")}\n\nLog file: ${logPath}`;
+      this.finishStatusBar(`ABS ${result.status === "warning" ? "warning" : "done"}: ${command}`);
       new Notice(`Apple Books Notes Sync: ${command} ${result.notice}`, result.status === "warning" ? 20000 : 10000);
       if (options.reportDialogOnSuccess || result.status === "warning") {
         new CommandResultModal(this.app, title, details).open();
@@ -472,8 +751,13 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
       const logPath = await this.safeWriteCommandLog(command, lines.join("\n"));
       const details = `${lines.join("\n")}\n\nLog file: ${logPath}`;
       console.error(`[Apple Books Notes Sync] ${command} failed`, error);
+      this.finishStatusBar(`ABS failed: ${command}`);
       new Notice(`Apple Books Notes Sync: ${command} failed. ${message}`, 30000);
-      new CommandResultModal(this.app, `Apple Books Notes Sync: ${command} failed`, details).open();
+      if (error instanceof CliResolutionError) {
+        new CliSetupModal(this.app, `${this.buildCliSetupDetails(error.failure)}\n\n${details}`).open();
+      } else {
+        new CommandResultModal(this.app, `Apple Books Notes Sync: ${command} failed`, details).open();
+      }
     } finally {
       this.commandRunning = false;
     }
@@ -558,6 +842,43 @@ class CommandResultModal extends Modal {
   }
 }
 
+class CliSetupModal extends Modal {
+  constructor(
+    app: App,
+    private readonly details: string,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Apple Books Notes Sync: CLI setup" });
+
+    const pre = contentEl.createEl("pre");
+    pre.setText(this.details);
+    pre.style.whiteSpace = "pre-wrap";
+    pre.style.maxHeight = "60vh";
+    pre.style.overflow = "auto";
+
+    new Setting(contentEl)
+      .addButton((button) => {
+        button.setButtonText("Copy install command").onClick(() => {
+          const clipboard = (navigator as Navigator & { clipboard?: { writeText(text: string): Promise<void> } }).clipboard;
+          void clipboard?.writeText("npm install -g apple-books-notes-sync");
+          new Notice("Apple Books Notes Sync: install command copied.", 4000);
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText("Copy path command").onClick(() => {
+          const clipboard = (navigator as Navigator & { clipboard?: { writeText(text: string): Promise<void> } }).clipboard;
+          void clipboard?.writeText("command -v absync");
+          new Notice("Apple Books Notes Sync: path command copied.", 4000);
+        });
+      });
+  }
+}
+
 class AppleBooksNotesSyncSettingTab extends PluginSettingTab {
   constructor(
     app: PluginSettingTab["app"],
@@ -587,7 +908,7 @@ class AppleBooksNotesSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("absync CLI path")
-      .setDesc("Optional full path to absync. Leave empty to auto-detect from PATH and common install locations.")
+      .setDesc("Required full path to absync. Use Detect to find and save it automatically.")
       .addText((text) => {
         text
           .setPlaceholder("/opt/homebrew/bin/absync")
@@ -603,6 +924,20 @@ class AppleBooksNotesSyncSettingTab extends PluginSettingTab {
               await this.plugin.saveSettings();
             })();
           });
+      })
+      .addButton((button) => {
+        button.setButtonText("Detect").onClick(() => {
+          void (async () => {
+            if (await this.plugin.detectAndSaveAbsyncCli()) {
+              this.display();
+            }
+          })();
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText("Test").onClick(() => {
+          void this.plugin.testConfiguredAbsyncCli();
+        });
       });
 
     new Setting(containerEl)
