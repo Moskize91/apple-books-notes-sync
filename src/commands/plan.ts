@@ -83,7 +83,7 @@ Change reasons:
     No previous sync state exists for this book.
 
   content-changed
-    Apple Books annotations or the source PDF file stamp changed.
+    EPUB annotations or the source PDF file stamp changed.
 
   format-changed
     The book format changed between EPUB and PDF.

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { hydrateEpubPackageMetadata } from "./book-metadata";
 import {
-  readAnnotationMaxModificationDates,
+  readEpubAnnotationMaxModificationDates,
   readBooks,
   readEpubRenderableCounts,
   readEpubAnnotations,
@@ -39,6 +39,7 @@ import type {
   SyncAssetState,
   SyncStats,
   SyncableBookFormat,
+  PdfPageAnnotations,
 } from "./types";
 
 export type SyncProgressEvent =
@@ -99,12 +100,14 @@ type BookSyncSnapshot = {
   bookFileRelativePath: string | null;
   pdfAssetDirRelativePath: string | null;
   coverImageRelativePath: string | null;
+  pdfSourceModifiedAt: Date | null;
 };
 
 type BookFingerprint = {
   book: Book & { format: SyncableBookFormat };
   hash: string;
   shouldHaveOutput: boolean;
+  pdfSourceModifiedAt: Date | null;
 };
 
 export type SyncPlanReason =
@@ -136,7 +139,7 @@ export type SyncPlanBook = {
   title: string;
   author: string | null;
   format: SyncableBookFormat;
-  annotationCount: number;
+  annotationCount: number | null;
   bookFileRelativePath: string | null;
   reason: SyncPlanReason;
 };
@@ -256,6 +259,17 @@ async function isBookSourceAvailable(book: Book): Promise<boolean> {
     return false;
   }
   return pathExists(book.path);
+}
+
+export function hasRenderablePdfPageAnnotations(pages: PdfPageAnnotations[]): boolean {
+  for (const page of pages) {
+    for (const annotation of sortPdfAnnotations(page.annotations)) {
+      if (extractPdfQuoteContent(annotation).length > 0 || extractPdfUserNoteContent(annotation).length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function toSyncStateAsset(
@@ -535,13 +549,14 @@ function buildAnnotationsByAssetId(
 
 async function buildBookFingerprint(
   book: Book & { format: SyncableBookFormat },
-  annotationMaxModificationDates: Map<string, number | null>,
+  epubAnnotationMaxModificationDates: Map<string, number | null>,
   epubRenderableCounts: Map<string, number>,
   previousStateAssets: Record<string, SyncAssetState>,
+  pdfBetaEnabled: boolean,
 ): Promise<BookFingerprint> {
   const previous = previousStateAssets[book.assetId];
   const annotationModifiedAtForHash =
-    book.format === "PDF" ? null : annotationMaxModificationDates.get(book.assetId) ?? null;
+    book.format === "PDF" ? null : epubAnnotationMaxModificationDates.get(book.assetId) ?? null;
   const sourceAvailable = await isBookSourceAvailable(book);
   if (!sourceAvailable) {
     const unavailableHash =
@@ -551,26 +566,31 @@ async function buildBookFingerprint(
       book,
       hash: unavailableHash,
       shouldHaveOutput: Boolean(previous?.bookFileRelativePath),
+      pdfSourceModifiedAt: null,
     };
   }
 
   const pdfFileStamp = book.format === "PDF" ? await getPdfFileStamp(book.path) : null;
+  const pdfSourceModifiedAt =
+    pdfFileStamp && pdfFileStamp !== "missing" ? new Date(pdfFileStamp.mtimeMs) : null;
   const baseHash = buildBookSyncHash(book.format, annotationModifiedAtForHash, pdfFileStamp);
   const hash = `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}`;
   let shouldHaveOutput: boolean;
   if (book.format === "EPUB") {
     shouldHaveOutput =
       (epubRenderableCounts.get(book.assetId) ?? 0) > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
-  } else if (previous && previous.hash === hash) {
-    shouldHaveOutput = previous.bookFileRelativePath !== null;
   } else {
-    shouldHaveOutput = book.annotationCount > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
+    shouldHaveOutput = Boolean(
+      previous?.bookFileRelativePath ||
+        (pdfBetaEnabled && book.path && (!previous || previous.hash !== hash)),
+    );
   }
 
   return {
     book,
     hash,
     shouldHaveOutput,
+    pdfSourceModifiedAt,
   };
 }
 
@@ -624,13 +644,19 @@ export async function buildSyncPlan(
     }
   }
 
-  const annotationMaxModificationDates = readAnnotationMaxModificationDates(
+  const epubAnnotationMaxModificationDates = readEpubAnnotationMaxModificationDates(
     paths.annotationDbPath,
     paths.libraryDbPath,
   );
   const epubRenderableCounts = readEpubRenderableCounts(paths.annotationDbPath, paths.libraryDbPath);
   const allBookFingerprints = await mapConcurrent(books, 2, (book) => {
-    return buildBookFingerprint(book, annotationMaxModificationDates, epubRenderableCounts, previousState.assets);
+    return buildBookFingerprint(
+      book,
+      epubAnnotationMaxModificationDates,
+      epubRenderableCounts,
+      previousState.assets,
+      config.pdfBetaEnabled,
+    );
   });
   const fingerprintByAssetId = new Map<string, BookFingerprint>();
   const hasOutputByAssetId = new Map<string, boolean>();
@@ -653,7 +679,7 @@ export async function buildSyncPlan(
   const bookSnapshots: BookSyncSnapshot[] = books.map((book) => {
     const fingerprint = fingerprintByAssetId.get(book.assetId);
     const annotationModifiedAtForHash =
-      book.format === "PDF" ? null : annotationMaxModificationDates.get(book.assetId) ?? null;
+      book.format === "PDF" ? null : epubAnnotationMaxModificationDates.get(book.assetId) ?? null;
     const hash =
       fingerprint?.hash ??
       `${buildBookSyncHash(book.format, annotationModifiedAtForHash, null)}|schema:${OUTPUT_SCHEMA_VERSION}`;
@@ -667,6 +693,7 @@ export async function buildSyncPlan(
           ? path.posix.join("assets", "pdf", book.assetId)
           : null,
       coverImageRelativePath: bookFileRelativePath ? path.posix.join("assets", "covers", `${book.assetId}.png`) : null,
+      pdfSourceModifiedAt: fingerprint?.pdfSourceModifiedAt ?? null,
     };
   });
 
@@ -938,15 +965,9 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
             generatedPdfImageCount = pdfPages.filter((page) => page.imageRelativePath).length;
           }
           if (pdfPages.length === 0) {
-            nextBookFileRelativePath = canPreservePreviousOutput
-              ? previousAssetState?.bookFileRelativePath ?? null
-              : null;
-            nextPdfAssetDirRelativePath = canPreservePreviousOutput
-              ? previousAssetState?.pdfAssetDirRelativePath ?? null
-              : null;
-            nextCoverImageRelativePath = canPreservePreviousOutput
-              ? previousAssetState?.coverImageRelativePath ?? null
-              : null;
+            nextBookFileRelativePath = null;
+            nextPdfAssetDirRelativePath = null;
+            nextCoverImageRelativePath = null;
           } else {
             nextBookFileRelativePath = snapshot.bookFileRelativePath;
             nextPdfAssetDirRelativePath =
@@ -986,7 +1007,12 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
                   epubChapterOrderByKey,
                   coverImagePropertyValue,
                 )
-              : renderPdfBookMarkdown(snapshot.book, pdfPages, coverImagePropertyValue);
+              : renderPdfBookMarkdown(
+                  snapshot.book,
+                  pdfPages,
+                  coverImagePropertyValue,
+                  snapshot.pdfSourceModifiedAt,
+                );
         }
 
         if (!options.dryRun) {

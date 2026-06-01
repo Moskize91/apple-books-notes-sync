@@ -294,25 +294,34 @@ test("renderPdfBookMarkdown renders single text note directly", () => {
     ...demoBook,
     format: "PDF",
     path: "/tmp/demo.pdf",
+    annotationCount: null,
+    annotationModifiedAt: new Date("2026-05-30T04:34:56Z"),
   };
-  const output = renderPdfBookMarkdown(pdfBook, [
-    {
-      pageNumber: 8,
-      imageRelativePath: "assets/pdf/asset-id/page-8.png",
-      notes: [
-        {
-          marker: null,
-          quoteText: "  单条 原文 \n  内容 ",
-          noteText: " \n\n 单条笔记内容\n",
-          hasRect: true,
-        },
-      ],
-    },
-  ]);
+  const output = renderPdfBookMarkdown(
+    pdfBook,
+    [
+      {
+        pageNumber: 8,
+        imageRelativePath: "assets/pdf/asset-id/page-8.png",
+        notes: [
+          {
+            marker: null,
+            quoteText: "  单条 原文 \n  内容 ",
+            noteText: " \n\n 单条笔记内容\n",
+            hasRect: true,
+          },
+        ],
+      },
+    ],
+    null,
+    new Date("2026-05-31T01:02:03Z"),
+  );
 
   assert.doesNotMatch(output, /## 页面标注/);
   assert.doesNotMatch(output, /### 第 8 页/);
   assert.match(output, /---/);
+  assert.match(output, /last_modified_at: 2026-05-31T01:02:03/);
+  assert.doesNotMatch(output, /last_modified_at: 2026-05-30T04:34:56/);
   assert.match(
     output,
     /<p align="center"><img src="\.\.\/assets\/pdf\/asset-id\/page-8\.png" alt="第8页" \/> <a href="\/tmp\/demo\.pdf#page=8">第 8 页<\/a><\/p>/,
@@ -333,6 +342,8 @@ test("renderPdfBookMarkdown renders multiple notes with markers and separators",
   const pdfBook: Book = {
     ...demoBook,
     format: "PDF",
+    annotationCount: null,
+    annotationModifiedAt: null,
   };
   const output = renderPdfBookMarkdown(pdfBook, [
     {

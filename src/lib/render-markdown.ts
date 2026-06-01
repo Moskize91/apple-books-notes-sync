@@ -324,6 +324,7 @@ export function renderPdfBookMarkdown(
   book: Book,
   pages: PdfRenderedPage[],
   coverImagePropertyValue?: string | null,
+  sourceModifiedAt?: Date | null,
 ): string {
   const lines: string[] = [];
   pushFrontmatter(lines, [
@@ -333,7 +334,7 @@ export function renderPdfBookMarkdown(
     ["format", "PDF"],
     ["pdf_beta", true],
     ["annotated_pages", pages.length],
-    ["last_modified_at", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
+    ["last_modified_at", sourceModifiedAt ? { type: "datetime", value: sourceModifiedAt } : null],
     ["cover", coverImagePropertyValue ?? null],
     ["source_file", book.path],
   ]);

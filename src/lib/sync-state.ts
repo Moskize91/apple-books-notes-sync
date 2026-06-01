@@ -218,9 +218,8 @@ export function buildBookSyncHash(
   annotationMaxModificationDate: number | null,
   pdfFileStamp: PdfFileStamp | "missing" | null,
 ): string {
-  const base = `${format}|mod:${toHashNumber(annotationMaxModificationDate)}`;
   if (format === "PDF") {
-    return `${base}|file:${toPdfStamp(pdfFileStamp)}`;
+    return `${format}|file:${toPdfStamp(pdfFileStamp)}`;
   }
-  return base;
+  return `${format}|mod:${toHashNumber(annotationMaxModificationDate)}`;
 }

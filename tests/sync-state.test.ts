@@ -17,9 +17,9 @@ test("buildBookSyncHash for EPUB uses annotation modification only", () => {
   assert.equal(hash, "EPUB|mod:12345");
 });
 
-test("buildBookSyncHash for PDF includes annotation and file stamp", () => {
+test("buildBookSyncHash for PDF uses source file stamp only", () => {
   const hash = buildBookSyncHash("PDF", 789, { mtimeMs: 1000.9, size: 2048 });
-  assert.equal(hash, "PDF|mod:789|file:1000:2048");
+  assert.equal(hash, "PDF|file:1000:2048");
 });
 
 test("readSyncState returns empty state when file is missing", async () => {

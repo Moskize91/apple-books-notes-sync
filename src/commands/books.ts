@@ -30,7 +30,7 @@ Output fields:
   Author
   Publisher, when Apple Books EPUB metadata is available
   Format: EPUB or PDF
-  Annotations: current Apple Books annotation count
+  Annotations: current Apple Books annotation count for EPUB; PDF shows "-"
 
 Notes:
   This command does not require a target vault.
@@ -68,14 +68,15 @@ Examples:
         for (const book of books) {
           const title = pad(book.title.slice(0, 40), widths[0] ?? 40);
           const author = pad((book.author ?? "-").slice(0, hasPublisher ? 20 : 24), widths[1] ?? 24);
+          const annotations = book.format === "EPUB" ? String(book.annotationCount ?? 0) : "-";
           if (hasPublisher) {
             const publisher = pad((book.publisher ?? "-").slice(0, 20), widths[2] ?? 20);
             const format = pad(book.format, widths[3] ?? 8);
-            const count = pad(String(book.annotationCount), widths[4] ?? 11);
+            const count = pad(annotations, widths[4] ?? 11);
             console.log([title, author, publisher, format, count].join("  "));
           } else {
             const format = pad(book.format, widths[2] ?? 8);
-            const count = pad(String(book.annotationCount), widths[3] ?? 11);
+            const count = pad(annotations, widths[3] ?? 11);
             console.log([title, author, format, count].join("  "));
           }
         }
