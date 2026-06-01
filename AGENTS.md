@@ -21,8 +21,4 @@
 
 - `docs/ARCHITECTURE.md`: 涉及项目整体结构、CLI 与 Obsidian plugin 的关系、构建产物或运行边界时，阅读此文。
 - `docs/PULL_REQUEST_WORKFLOW.md`: 进行 Git 操作或 GitHub 相关操作，如提交代码、推分支、提 PR、检查 PR 状态前阅读此文。
-- `README.md`: 涉及用户安装、CLI 命令、首次运行、开发构建入口或英文公开说明时，阅读此文。
-- `README.zh-CN.md`: 涉及中文用户说明、中文公开文档或中英文 README 信息同步时，阅读此文。
-- `src/lib/plugin-settings.ts`: 涉及 Obsidian plugin 设置格式、`data.json` 兼容性、CLI path 配置或 vault-scoped sync config 映射时，先阅读此文件。
-- `src/lib/sync.ts`: 涉及同步计划、同步状态、Markdown/PDF 资产写入、进度事件或输出 schema 版本时，先阅读此文件。
-- `src/lib/pdf.ts`: 涉及 PDF 注释提取、PDF 页面渲染、标注编号 overlay、PDF renderer 选择或图片尺寸处理时，先阅读此文件。
+- `README.md` 和 `README.zh-CN.md`: 涉及用户安装、CLI 命令、首次运行、开发构建入口或英文公开说明时，阅读此文。
