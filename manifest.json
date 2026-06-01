@@ -1,0 +1,10 @@
+{
+  "id": "apple-books-notes-sync",
+  "name": "Apple Books Notes Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.8.0",
+  "description": "Sync Apple Books highlights and notes to Markdown files.",
+  "author": "Moskize91",
+  "authorUrl": "https://github.com/moskize91",
+  "isDesktopOnly": true
+}

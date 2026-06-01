@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildBookSyncHash, readSyncState, writeSyncState } from "../src/lib/sync-state";
+import {
+  buildBookSyncHash,
+  getSyncStatePath,
+  getSyncStateSqlitePath,
+  readSyncState,
+  writeSyncState,
+} from "../src/lib/sync-state";
 import type { SyncAssetState } from "../src/lib/types";
 
 test("buildBookSyncHash for EPUB uses annotation modification only", () => {
@@ -45,6 +51,7 @@ test("writeSyncState persists assets", async () => {
     await writeSyncState(tempDir, assets);
 
     const reloaded = await readSyncState(tempDir);
+    assert.equal(await fileExists(getSyncStateSqlitePath(tempDir)), true);
     assert.equal(reloaded.assets["asset-1"]?.hash, "EPUB|mod:10");
     assert.equal(reloaded.assets["asset-1"]?.lastSyncedAt, "2026-02-28T00:00:00.000Z");
     assert.equal(reloaded.assets["asset-1"]?.coverImageRelativePath, "assets/covers/asset-1.png");
@@ -52,3 +59,43 @@ test("writeSyncState persists assets", async () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("readSyncState migrates legacy JSON state when sqlite state is missing", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "apple-books-sync-state-"));
+  try {
+    await fs.writeFile(
+      getSyncStatePath(tempDir),
+      JSON.stringify({
+        version: 1,
+        updatedAt: "2026-02-28T00:00:00.000Z",
+        assets: {
+          legacy: {
+            assetId: "legacy",
+            title: "Legacy",
+            format: "EPUB",
+            hash: "EPUB|mod:1",
+            lastSyncedAt: null,
+            bookFileRelativePath: "books/legacy.md",
+            pdfAssetDirRelativePath: null,
+            coverImageRelativePath: null,
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const state = await readSyncState(tempDir);
+    assert.equal(state.assets.legacy?.title, "Legacy");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}

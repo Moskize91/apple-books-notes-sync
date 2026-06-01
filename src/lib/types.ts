@@ -15,12 +15,14 @@ export type Rect = {
   y2: number;
 };
 
-export type CliConfig = {
-  outputDir: string | null;
+export type SyncConfig = {
+  vaultDir: string;
   managedDirName: string;
   pdfBetaEnabled: boolean;
   pdfRenderBackend: PdfRenderBackend;
 };
+
+export type CliConfig = SyncConfig;
 
 export type IBooksPaths = {
   booksPlistPath: string;

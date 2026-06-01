@@ -4,10 +4,10 @@ import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
 import { registerBooksCommand } from "./commands/books";
-import { registerConfigCommand } from "./commands/config";
 import { registerDoctorCommand } from "./commands/doctor";
 import { registerPlanCommand } from "./commands/plan";
 import { registerSyncCommand } from "./commands/sync";
+import { registerVaultsCommand } from "./commands/vaults";
 
 function readPackageVersion(): string {
   const packageJsonPath = path.resolve(__dirname, "../package.json");
@@ -33,15 +33,14 @@ program
 Help:
   Use --help on any command to open the next level of documentation:
 
-    absync config --help
     absync plan --help
     absync sync --help
     absync books --help
     absync doctor --help
+    absync vaults --help
 
 Typical workflow:
-  1. Configure the Obsidian vault root:
-       absync config set output.dir "/path/to/ObsidianVault"
+  1. Install and enable the Apple Books Notes Sync plugin in an Obsidian vault.
 
   2. Check the local environment:
        absync doctor
@@ -52,25 +51,25 @@ Typical workflow:
   4. Sync notes:
        absync sync
 
-Important paths:
-  Config file:
-    ~/Library/Application Support/apple-books-notes-sync/config.json
+Vault selection:
+  absync auto-detects vaults from Obsidian. Use --vault with a vault id, name,
+  or path when more than one target vault is available.
 
   Sync output directory:
-    <output.dir>/<output.managedDirName>
+    <vault>/<managedDirName>
 
 Rules:
-  output.dir is required. It must be an existing Obsidian vault root and contain .obsidian/.
+  The target vault must have the Apple Books Notes Sync plugin installed and enabled.
   absync reads Apple Books data from the local macOS Apple Books databases.
-  absync writes only inside the managed output directory under the configured vault.
+  absync writes only inside the managed output directory under the selected vault.
 `,
   );
 
-registerConfigCommand(program);
 registerPlanCommand(program);
 registerSyncCommand(program);
 registerBooksCommand(program);
 registerDoctorCommand(program);
+registerVaultsCommand(program);
 
 if (process.argv.length <= 2) {
   program.outputHelp();

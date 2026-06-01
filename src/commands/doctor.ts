@@ -1,7 +1,10 @@
 import type { Command } from "commander";
-import { ConfigValidationError, loadValidatedConfig } from "../lib/config";
-import { resolveIbooksPaths } from "../lib/ibooks-paths";
 import { runDoctor } from "../lib/doctor";
+import { loadCommandContext, printCommandError } from "./context";
+
+type DoctorOptions = {
+  vault?: string;
+};
 
 export function registerDoctorCommand(program: Command): void {
   program
@@ -9,6 +12,7 @@ export function registerDoctorCommand(program: Command): void {
     .description("Run basic environment checks")
     .addHelpCommand(false)
     .showHelpAfterError("(run `absync doctor --help` for usage)")
+    .option("--vault <selector>", "target vault id, vault name, or path")
     .addHelpText(
       "after",
       `
@@ -18,7 +22,7 @@ What this checks:
   Apple Books database readability
   optional EPUB metadata cache readability
   Apple Books query health
-  config validity
+  target vault plugin installation and settings
   output directory writability
   PDF renderer availability and selected renderer
   CPU architecture and Node.js version
@@ -37,8 +41,7 @@ Typical fixes:
     make sure HOME has not been overridden or isolated
     run absync on macOS
 
-  Configure the Obsidian vault:
-    absync config set output.dir "/path/to/ObsidianVault"
+  Install and enable Apple Books Notes Sync in the target Obsidian vault.
 
   Install optional PDF renderers:
     brew install mupdf-tools
@@ -46,23 +49,13 @@ Typical fixes:
 
 Examples:
   absync doctor
+  absync doctor --vault "MyVault"
 `,
     )
-    .action(() => {
+    .action((options: DoctorOptions) => {
       void (async () => {
-        const paths = await resolveIbooksPaths();
-        let config = null;
-        let configError: ConfigValidationError | null = null;
-        try {
-          config = await loadValidatedConfig();
-        } catch (error: unknown) {
-          if (error instanceof ConfigValidationError) {
-            configError = error;
-          } else {
-            throw error;
-          }
-        }
-        const report = await runDoctor(paths, config, configError);
+        const { config, paths } = await loadCommandContext(options);
+        const report = await runDoctor(paths, config, null);
 
         for (const check of report.checks) {
           const status = check.ok ? "PASS" : "FAIL";
@@ -78,12 +71,7 @@ Examples:
           process.exitCode = 1;
         }
       })().catch((error: unknown) => {
-        if (error instanceof Error) {
-          console.error(error.message);
-        } else {
-          console.error("doctor failed");
-        }
-        process.exitCode = 1;
+        printCommandError(error, "doctor failed");
       });
     });
 }

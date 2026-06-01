@@ -33,7 +33,7 @@ Output fields:
   Annotations: current Apple Books annotation count
 
 Notes:
-  This command does not require absync config.
+  This command does not require a target vault.
   This command does not write files.
   Use absync plan to see which listed books need synchronization.
 

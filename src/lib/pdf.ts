@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
 import type { PdfAnnotation, PdfPageAnnotations, PdfRenderBackend, Rect } from "./types";
 import { normalizeQuoteText } from "./quote-normalize";
 
@@ -20,6 +20,10 @@ type ResolvedPdfRenderBackend = Exclude<PdfRenderBackend, "auto">;
 type PdfRendererAvailability = {
   mutool: boolean;
   poppler: boolean;
+  swift: boolean;
+  swiftRenderScript: boolean;
+  sips: boolean;
+  magick: boolean;
 };
 type PdfOverlayAnnotation = {
   marker: string | null;
@@ -33,6 +37,14 @@ type PdfPageTextItem = {
 
 let cachedPdfJsModule: PdfJsModule | null = null;
 const cachedPdfCommandAvailability = new Map<string, boolean>();
+let pdfCommands = {
+  swift: "swift",
+  mutool: "mutool",
+  pdftocairo: "pdftocairo",
+  sips: "sips",
+  magick: "magick",
+  swiftRenderScriptPath: "",
+};
 const NON_TEXT_PDF_SUBTYPES = new Set([
   "sound",
   "popup",
@@ -263,8 +275,9 @@ async function readPdfPageTextItems(page: {
 
 export async function extractPdfPageAnnotations(pdfPath: string): Promise<PdfPageAnnotations[]> {
   const pdfjs = await getPdfJsModule();
+  const pdfData = await fsPromises.readFile(pdfPath);
   const loadingTask = pdfjs.getDocument({
-    url: pdfPath,
+    data: new Uint8Array(pdfData),
     disableWorker: true,
     isEvalSupported: false,
     useSystemFonts: true,
@@ -518,11 +531,25 @@ function escapeXml(input: string): string {
 }
 
 function getRenderScriptPath(): string {
+  return findRenderScriptPath() ?? path.resolve(__dirname, "../tools/render_pdf_page.swift");
+}
+
+export function findRenderScriptPath(): string | null {
+  if (pdfCommands.swiftRenderScriptPath && fs.existsSync(pdfCommands.swiftRenderScriptPath)) {
+    return pdfCommands.swiftRenderScriptPath;
+  }
+
   const candidates = [
+    path.resolve(__dirname, "tools/render_pdf_page.swift"),
     path.resolve(__dirname, "../tools/render_pdf_page.swift"),
     path.resolve(__dirname, "../../tools/render_pdf_page.swift"),
   ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+export function setPdfCommands(commands: Partial<typeof pdfCommands>): void {
+  pdfCommands = { ...pdfCommands, ...commands };
+  cachedPdfCommandAvailability.clear();
 }
 
 function isCommandAvailable(command: string): boolean {
@@ -545,8 +572,12 @@ function isCommandAvailable(command: string): boolean {
 
 export function detectPdfRendererAvailability(): PdfRendererAvailability {
   return {
-    mutool: isCommandAvailable("mutool"),
-    poppler: isCommandAvailable("pdftocairo"),
+    mutool: isCommandAvailable(pdfCommands.mutool),
+    poppler: isCommandAvailable(pdfCommands.pdftocairo),
+    swift: isCommandAvailable(pdfCommands.swift),
+    swiftRenderScript: findRenderScriptPath() !== null,
+    sips: isCommandAvailable(pdfCommands.sips),
+    magick: isCommandAvailable(pdfCommands.magick),
   };
 }
 
@@ -561,6 +592,12 @@ export function resolvePdfRenderBackend(
     if (availability.poppler) {
       return "poppler";
     }
+    if (!availability.swift) {
+      throw new Error('PDF renderer "swift" is not available.');
+    }
+    if (!availability.swiftRenderScript) {
+      throw new Error('PDF renderer "swift" render script is missing from the plugin or package.');
+    }
     return "swift";
   }
 
@@ -572,11 +609,19 @@ export function resolvePdfRenderBackend(
     throw new Error('PDF renderer "poppler" is not available. Install with: brew install poppler');
   }
 
+  if (requested === "swift" && !availability.swift) {
+    throw new Error('PDF renderer "swift" is not available.');
+  }
+
+  if (requested === "swift" && !availability.swiftRenderScript) {
+    throw new Error('PDF renderer "swift" render script is missing from the plugin or package.');
+  }
+
   return requested;
 }
 
 function renderPdfPageToPngWithSwift(pdfPath: string, pageNumber: number, outputPath: string, scale: number): void {
-  execFileSync("swift", [getRenderScriptPath(), pdfPath, String(pageNumber), outputPath, String(scale)], {
+  execFileSync(pdfCommands.swift, [getRenderScriptPath(), pdfPath, String(pageNumber), outputPath, String(scale)], {
     encoding: "utf8",
     maxBuffer: 8 * 1024 * 1024,
   });
@@ -585,7 +630,7 @@ function renderPdfPageToPngWithSwift(pdfPath: string, pageNumber: number, output
 function renderPdfPageToPngWithMutool(pdfPath: string, pageNumber: number, outputPath: string, scale: number): void {
   const dpi = Math.max(36, Math.round(72 * scale));
   execFileSync(
-    "mutool",
+    pdfCommands.mutool,
     ["draw", "-q", "-F", "png", "-r", String(dpi), "-o", outputPath, pdfPath, String(pageNumber)],
     {
       encoding: "utf8",
@@ -598,7 +643,7 @@ function renderPdfPageToPngWithPoppler(pdfPath: string, pageNumber: number, outp
   const dpi = Math.max(36, Math.round(72 * scale));
   const outputBasePath = outputPath.toLowerCase().endsWith(".png") ? outputPath.slice(0, -4) : outputPath;
   execFileSync(
-    "pdftocairo",
+    pdfCommands.pdftocairo,
     [
       "-png",
       "-singlefile",
@@ -647,25 +692,13 @@ export function renderPdfCoverToPng(
 }
 
 export async function limitPngMaxDimension(imagePath: string, maxDimension: number): Promise<void> {
-  const metadata = await sharp(imagePath).metadata();
-  if (!metadata.width || !metadata.height) {
+  if (!isCommandAvailable(pdfCommands.sips)) {
     return;
   }
-  const longestSide = Math.max(metadata.width, metadata.height);
-  if (longestSide <= maxDimension) {
-    return;
-  }
-
-  const resized = await sharp(imagePath)
-    .resize({
-      width: maxDimension,
-      height: maxDimension,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .png()
-    .toBuffer();
-  await sharp(resized).toFile(imagePath);
+  execFileSync(pdfCommands.sips, ["-Z", String(maxDimension), imagePath], {
+    encoding: "utf8",
+    stdio: "ignore",
+  });
 }
 
 export function sortPdfAnnotations(annotations: PdfAnnotation[]): PdfAnnotation[] {
@@ -711,18 +744,33 @@ export async function overlayPdfAnnotationNumbers(
     return;
   }
 
-  const metadata = await sharp(imagePath).metadata();
-  if (!metadata.width || !metadata.height) {
+  if (!isCommandAvailable(pdfCommands.magick)) {
     return;
   }
 
-  const overlaySvg = toOverlaySvg(metadata.width, metadata.height, pageWidth, pageHeight, annotations);
-  const outputBuffer = await sharp(imagePath)
-    .composite([{ input: Buffer.from(overlaySvg), blend: "over" }])
-    .png()
-    .toBuffer();
+  const identify = execFileSync(pdfCommands.magick, ["identify", "-format", "%w %h", imagePath], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  }).trim();
+  const [width, height] = identify.split(/\s+/).map((value) => Number(value));
+  if (!width || !height) {
+    return;
+  }
 
-  await sharp(outputBuffer).toFile(imagePath);
+  const overlaySvg = toOverlaySvg(width, height, pageWidth, pageHeight, annotations);
+  const overlayPath = `${imagePath}.overlay.svg`;
+  const outputPath = `${imagePath}.overlay.png`;
+  try {
+    fs.writeFileSync(overlayPath, overlaySvg, "utf8");
+    execFileSync(pdfCommands.magick, [imagePath, overlayPath, "-compose", "over", "-composite", outputPath], {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    fs.renameSync(outputPath, imagePath);
+  } finally {
+    fs.rmSync(overlayPath, { force: true });
+    fs.rmSync(outputPath, { force: true });
+  }
 }
 
 export function pdfAnnotationLabel(annotation: PdfAnnotation): string {

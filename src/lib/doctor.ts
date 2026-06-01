@@ -2,10 +2,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readBooks } from "./ibooks-data";
-import { detectPdfRendererAvailability, resolvePdfRenderBackend } from "./pdf";
+import { detectPdfRendererAvailability, findRenderScriptPath, resolvePdfRenderBackend } from "./pdf";
 import { sqliteVersion } from "./sqlite";
-import type { ConfigValidationError } from "./config";
-import type { CliConfig, IBooksPaths } from "./types";
+import type { IBooksPaths, SyncConfig } from "./types";
 
 export type DoctorCheck = {
   name: string;
@@ -60,8 +59,8 @@ function isSyncableFormat(format: string): boolean {
 
 export async function runDoctor(
   paths: IBooksPaths,
-  config: CliConfig | null,
-  configError: ConfigValidationError | null = null,
+  config: SyncConfig | null,
+  configError: Error | null = null,
 ): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
 
@@ -122,6 +121,28 @@ export async function runDoctor(
       ? "pdftocairo found"
       : "not found (optional, install: brew install poppler)",
   });
+  checks.push({
+    name: "swift available",
+    ok: pdfRendererAvailability.swift,
+    detail: pdfRendererAvailability.swift ? "swift found" : "not found (required if mutool/pdftocairo are unavailable)",
+  });
+  checks.push({
+    name: "Swift PDF render script",
+    ok: pdfRendererAvailability.swiftRenderScript,
+    detail: findRenderScriptPath() ?? "tools/render_pdf_page.swift not found",
+  });
+  checks.push({
+    name: "sips available",
+    ok: pdfRendererAvailability.sips,
+    detail: pdfRendererAvailability.sips ? "sips found" : "not found (required for cover conversion and image resizing)",
+  });
+  checks.push({
+    name: "magick available",
+    ok: true,
+    detail: pdfRendererAvailability.magick
+      ? "magick found"
+      : "not found (optional, install ImageMagick for PDF annotation overlays)",
+  });
 
   if (paths.epubInfoDbPath) {
     checks.push({
@@ -169,14 +190,7 @@ export async function runDoctor(
   }
 
   if (config) {
-    if (!config.outputDir) {
-      checks.push({
-        name: "config",
-        ok: false,
-        detail: "Missing required config: output.dir Run: absync config set output.dir <path-to-obsidian-vault>",
-      });
-    } else {
-    const managedOutput = path.join(config.outputDir, config.managedDirName);
+    const managedOutput = path.join(config.vaultDir, config.managedDirName);
     const writable = await canWriteDir(managedOutput);
     checks.push({
       name: "output directory writable",
@@ -197,7 +211,6 @@ export async function runDoctor(
         ok: false,
         detail: error instanceof Error ? error.message : "invalid renderer configuration",
       });
-    }
     }
   } else if (configError) {
     checks.push({

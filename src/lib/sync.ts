@@ -1,6 +1,6 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
 import { hydrateEpubPackageMetadata } from "./book-metadata";
 import {
   readAnnotationMaxModificationDates,
@@ -32,10 +32,10 @@ import {
 import { acquireSyncLock, buildBookSyncHash, readSyncState, writeSyncState } from "./sync-state";
 import type {
   Book,
-  CliConfig,
   EpubAnnotation,
   IBooksPaths,
   PdfRenderBackend,
+  SyncConfig,
   SyncAssetState,
   SyncStats,
   SyncableBookFormat,
@@ -434,26 +434,23 @@ async function generatePdfPages(
   return items;
 }
 
-async function hasRenderablePdfAnnotations(pdfPath: string): Promise<boolean> {
-  const pages = await extractPdfPageAnnotations(pdfPath);
-  return pages.some((page) => {
-    return page.annotations.some((annotation) => {
-      return extractPdfQuoteContent(annotation).length > 0 || extractPdfUserNoteContent(annotation).length > 0;
-    });
-  });
-}
-
-async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promise<void> {
+async function writeCoverPngFromBuffer(input: Buffer, outputPath: string): Promise<boolean> {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await sharp(input)
-    .resize({
-      width: COVER_IMAGE_MAX_DIMENSION,
-      height: COVER_IMAGE_MAX_DIMENSION,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .png()
-    .toFile(outputPath);
+  const inputPath = `${outputPath}.source`;
+  try {
+    await fs.writeFile(inputPath, input);
+    execFileSync("sips", ["-s", "format", "png", "-Z", String(COVER_IMAGE_MAX_DIMENSION), inputPath, "--out", outputPath], {
+      encoding: "utf8",
+      stdio: "ignore",
+    });
+    return true;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    log("warn", `failed to generate EPUB cover with sips: ${message}`);
+    return false;
+  } finally {
+    await fs.rm(inputPath, { force: true });
+  }
 }
 
 async function generateBookCover(
@@ -472,7 +469,7 @@ async function generateBookCover(
       return false;
     }
     if (!dryRun) {
-      await writeCoverPngFromBuffer(coverBuffer, coverImageAbsolutePath);
+      return writeCoverPngFromBuffer(coverBuffer, coverImageAbsolutePath);
     }
     return true;
   }
@@ -535,10 +532,8 @@ async function buildBookFingerprint(
       (epubRenderableCounts.get(book.assetId) ?? 0) > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
   } else if (previous && previous.hash === hash) {
     shouldHaveOutput = previous.bookFileRelativePath !== null;
-  } else if (!book.path) {
-    shouldHaveOutput = false;
   } else {
-    shouldHaveOutput = await hasRenderablePdfAnnotations(book.path);
+    shouldHaveOutput = book.annotationCount > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
   }
 
   return {
@@ -578,21 +573,17 @@ function toRemovedPlanBook(asset: SyncAssetState): SyncPlanRemovedBook {
 }
 
 export async function buildSyncPlan(
-  config: CliConfig,
+  config: SyncConfig,
   paths: IBooksPaths,
   options: { bookFilter?: string | undefined },
 ): Promise<SyncPlan> {
-  if (!config.outputDir) {
-    throw new Error("Missing required config: output.dir");
-  }
-
   const allBooks = await hydrateEpubPackageMetadata(
     readBooks(paths.libraryDbPath, paths.annotationDbPath, paths.epubInfoDbPath).filter(isSyncableBook),
   );
   const books = filterBooks(allBooks, options.bookFilter);
   const isFullSync = !options.bookFilter;
 
-  const outputDir = path.resolve(config.outputDir, config.managedDirName);
+  const outputDir = path.resolve(config.vaultDir, config.managedDirName);
   const booksDirName = "books";
   const previousState = await readSyncState(outputDir);
   const nextStateAssets: Record<string, SyncAssetState> = { ...previousState.assets };
@@ -748,7 +739,7 @@ export async function buildSyncPlan(
   };
 }
 
-export async function runSync(config: CliConfig, paths: IBooksPaths, options: SyncOptions): Promise<SyncResult> {
+export async function runSync(config: SyncConfig, paths: IBooksPaths, options: SyncOptions): Promise<SyncResult> {
   const plan = await buildSyncPlan(config, paths, { bookFilter: options.bookFilter });
   const {
     outputDir,

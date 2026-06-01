@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import type { SyncAssetState, SyncState, SyncableBookFormat } from "./types";
 
 const STATE_FILE_NAME = ".sync-state.json";
-const LOCK_FILE_NAME = ".sync.lock";
+const STATE_DIR_NAME = ".absync";
+const SQLITE_STATE_FILE_NAME = "state.sqlite";
+const LOCK_FILE_NAME = "lock";
 
 type PdfFileStamp = {
   mtimeMs: number;
@@ -66,57 +69,106 @@ export function getSyncStatePath(outputDir: string): string {
   return path.join(outputDir, STATE_FILE_NAME);
 }
 
-export async function readSyncState(outputDir: string): Promise<SyncState> {
-  const statePath = getSyncStatePath(outputDir);
-  try {
-    const raw = await fs.readFile(statePath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<SyncState>;
-    if (!parsed || typeof parsed !== "object") {
-      return createEmptyState();
-    }
+export function getSyncStateDir(outputDir: string): string {
+  return path.join(outputDir, STATE_DIR_NAME);
+}
 
-    const assets: Record<string, SyncAssetState> = {};
-    const rawAssets = parsed.assets;
-    if (rawAssets && typeof rawAssets === "object") {
-      for (const [assetId, value] of Object.entries(rawAssets)) {
-        const normalized = normalizeStateAsset(assetId, value);
-        if (normalized) {
-          assets[assetId] = normalized;
-        }
+export function getSyncStateSqlitePath(outputDir: string): string {
+  return path.join(getSyncStateDir(outputDir), SQLITE_STATE_FILE_NAME);
+}
+
+function quoteSqlString(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function runStateSqlite(dbPath: string, sql: string): string {
+  return execFileSync("sqlite3", [dbPath, sql], {
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+}
+
+function parseSyncState(raw: string): SyncState {
+  const parsed = JSON.parse(raw) as Partial<SyncState>;
+  if (!parsed || typeof parsed !== "object") {
+    return createEmptyState();
+  }
+
+  const assets: Record<string, SyncAssetState> = {};
+  const rawAssets = parsed.assets;
+  if (rawAssets && typeof rawAssets === "object") {
+    for (const [assetId, value] of Object.entries(rawAssets)) {
+      const normalized = normalizeStateAsset(assetId, value);
+      if (normalized) {
+        assets[assetId] = normalized;
       }
     }
+  }
 
-    return {
-      version: 1,
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
-      assets,
-    };
+  return {
+    version: 1,
+    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
+    assets,
+  };
+}
+
+async function readLegacyJsonSyncState(outputDir: string): Promise<SyncState | null> {
+  try {
+    return parseSyncState(await fs.readFile(getSyncStatePath(outputDir), "utf8"));
   } catch (error: unknown) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError?.code === "ENOENT") {
-      return createEmptyState();
+      return null;
     }
     throw error;
   }
 }
 
+export async function readSyncState(outputDir: string): Promise<SyncState> {
+  const sqlitePath = getSyncStateSqlitePath(outputDir);
+  try {
+    await fs.mkdir(getSyncStateDir(outputDir), { recursive: true });
+    const output = runStateSqlite(
+      sqlitePath,
+      "CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); SELECT value FROM sync_state WHERE key = 'state';",
+    ).trim();
+    if (output.length > 0) {
+      return parseSyncState(output);
+    }
+  } catch (error: unknown) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError?.code !== "ENOENT") {
+      const legacy = await readLegacyJsonSyncState(outputDir);
+      return legacy ?? createEmptyState();
+    }
+  }
+
+  const legacy = await readLegacyJsonSyncState(outputDir);
+  return legacy ?? createEmptyState();
+}
+
 export async function writeSyncState(outputDir: string, assets: Record<string, SyncAssetState>): Promise<void> {
-  const statePath = getSyncStatePath(outputDir);
-  const tempPath = `${statePath}.tmp-${Date.now()}-${process.pid}`;
+  const sqlitePath = getSyncStateSqlitePath(outputDir);
   const state: SyncState = {
     version: 1,
     updatedAt: new Date().toISOString(),
     assets,
   };
 
-  await fs.mkdir(outputDir, { recursive: true });
-  await fs.writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  await fs.rename(tempPath, statePath);
+  await fs.mkdir(getSyncStateDir(outputDir), { recursive: true });
+  const json = JSON.stringify(state);
+  runStateSqlite(
+    sqlitePath,
+    [
+      "CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+      `INSERT INTO sync_state (key, value) VALUES ('state', '${quoteSqlString(json)}') ON CONFLICT(key) DO UPDATE SET value = excluded.value;`,
+    ].join(" "),
+  );
 }
 
 export async function acquireSyncLock(outputDir: string): Promise<() => Promise<void>> {
-  await fs.mkdir(outputDir, { recursive: true });
-  const lockPath = path.join(outputDir, LOCK_FILE_NAME);
+  await fs.mkdir(getSyncStateDir(outputDir), { recursive: true });
+  const lockPath = path.join(getSyncStateDir(outputDir), LOCK_FILE_NAME);
 
   let handle;
   try {
@@ -124,7 +176,7 @@ export async function acquireSyncLock(outputDir: string): Promise<() => Promise<
   } catch (error: unknown) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError?.code === "EEXIST") {
-      const wrapped = new Error("Another sync process is running. Remove .sync.lock if no sync is active.");
+      const wrapped = new Error("Another sync process is running. Remove .absync/lock if no sync is active.");
       (wrapped as Error & { cause?: unknown }).cause = error;
       throw wrapped;
     }

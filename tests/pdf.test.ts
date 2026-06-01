@@ -120,6 +120,10 @@ test("resolvePdfRenderBackend uses mutool first in auto mode", () => {
   const backend = resolvePdfRenderBackend("auto", {
     mutool: true,
     poppler: true,
+    swift: true,
+    swiftRenderScript: true,
+    sips: true,
+    magick: true,
   });
   assert.equal(backend, "mutool");
 });
@@ -128,10 +132,18 @@ test("resolvePdfRenderBackend falls back to poppler then swift in auto mode", ()
   const popplerBackend = resolvePdfRenderBackend("auto", {
     mutool: false,
     poppler: true,
+    swift: true,
+    swiftRenderScript: true,
+    sips: true,
+    magick: true,
   });
   const swiftBackend = resolvePdfRenderBackend("auto", {
     mutool: false,
     poppler: false,
+    swift: true,
+    swiftRenderScript: true,
+    sips: true,
+    magick: true,
   });
   assert.equal(popplerBackend, "poppler");
   assert.equal(swiftBackend, "swift");
@@ -143,6 +155,10 @@ test("resolvePdfRenderBackend rejects unavailable explicit renderer", () => {
       resolvePdfRenderBackend("mutool", {
         mutool: false,
         poppler: true,
+        swift: true,
+        swiftRenderScript: true,
+        sips: true,
+        magick: true,
       });
     },
     /brew install mupdf-tools/,
@@ -152,6 +168,10 @@ test("resolvePdfRenderBackend rejects unavailable explicit renderer", () => {
       resolvePdfRenderBackend("poppler", {
         mutool: true,
         poppler: false,
+        swift: true,
+        swiftRenderScript: true,
+        sips: true,
+        magick: true,
       });
     },
     /brew install poppler/,
@@ -162,4 +182,8 @@ test("detectPdfRendererAvailability returns booleans", () => {
   const availability = detectPdfRendererAvailability();
   assert.equal(typeof availability.mutool, "boolean");
   assert.equal(typeof availability.poppler, "boolean");
+  assert.equal(typeof availability.swift, "boolean");
+  assert.equal(typeof availability.swiftRenderScript, "boolean");
+  assert.equal(typeof availability.sips, "boolean");
+  assert.equal(typeof availability.magick, "boolean");
 });
