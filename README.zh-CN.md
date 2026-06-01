@@ -150,7 +150,7 @@ npm run build
 本地插件调试时，复制 `.env.template` 为 `.env.local`，填写 `OBSIDIAN_DEV_VAULT`，然后运行：
 
 ```sh
-npm run dev:plugin:install
+npm run install:plugin
 ```
 
 插件发布 staging 目录是 `plugin-dist/`，其中包含 Obsidian GitHub Release 所需的 `main.js`、`manifest.json` 和可选 `styles.css`。

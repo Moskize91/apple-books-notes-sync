@@ -157,7 +157,7 @@ For local plugin development, copy `.env.template` to `.env.local`, set
 `OBSIDIAN_DEV_VAULT`, then run:
 
 ```sh
-npm run dev:plugin:install
+npm run install:plugin
 ```
 
 The plugin release staging directory is `plugin-dist/`. It contains the files

@@ -3,6 +3,7 @@ import { runDoctor } from "../lib/doctor";
 import { loadCommandContext, printCommandError } from "./context";
 
 type DoctorOptions = {
+  json?: boolean;
   vault?: string;
 };
 
@@ -13,6 +14,7 @@ export function registerDoctorCommand(program: Command): void {
     .addHelpCommand(false)
     .showHelpAfterError("(run `absync doctor --help` for usage)")
     .option("--vault <selector>", "target vault id, vault name, or path")
+    .option("--json", "print machine-readable JSON output")
     .addHelpText(
       "after",
       `
@@ -56,6 +58,14 @@ Examples:
       void (async () => {
         const { config, paths } = await loadCommandContext(options);
         const report = await runDoctor(paths, config, null);
+
+        if (options.json) {
+          console.log(JSON.stringify(report, null, 2));
+          if (!report.ok) {
+            process.exitCode = 1;
+          }
+          return;
+        }
 
         for (const check of report.checks) {
           const status = check.ok ? "PASS" : "FAIL";

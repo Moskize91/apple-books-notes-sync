@@ -41,9 +41,40 @@ import type {
   SyncableBookFormat,
 } from "./types";
 
+export type SyncProgressEvent =
+  | {
+      type: "plan";
+      totalBooks: number;
+      changedBooks: number;
+      unchangedBooks: number;
+      removedBooks: number;
+    }
+  | {
+      type: "book";
+      phase: "dry-run preparing" | "syncing";
+      index: number;
+      total: number;
+      assetId: string;
+      title: string;
+      format: SyncableBookFormat;
+    }
+  | {
+      type: "warning";
+      title: string;
+      message: string;
+    }
+  | {
+      type: "complete";
+      successBooks: number;
+      failedBooks: number;
+      skippedBooks: number;
+      generatedFiles: number;
+    };
+
 type SyncOptions = {
   dryRun: boolean;
   bookFilter?: string;
+  onProgress?: (event: SyncProgressEvent) => void;
 };
 
 type SyncResult = {
@@ -143,7 +174,7 @@ export type SyncPlan = {
 };
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
-const OUTPUT_SCHEMA_VERSION = 39;
+const OUTPUT_SCHEMA_VERSION = 40;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 
@@ -786,6 +817,13 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
     "info",
     `sync plan: changed=${plan.stats.changedBooks}, unchanged=${plan.stats.unchangedBooks}, removed=${plan.stats.removedBooks}`,
   );
+  options.onProgress?.({
+    type: "plan",
+    totalBooks: plan.stats.totalBooks,
+    changedBooks: plan.stats.changedBooks,
+    unchangedBooks: plan.stats.unchangedBooks,
+    removedBooks: plan.stats.removedBooks,
+  });
 
   const changedEpubAssetIds = new Set(
     changedSnapshots
@@ -826,6 +864,15 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
       const progress = `${index + 1}/${changedSnapshots.length}`;
       const action = options.dryRun ? "dry-run preparing" : "syncing";
       log("info", `${action} (${progress}) [${snapshot.book.format}] ${snapshot.book.title}`);
+      options.onProgress?.({
+        type: "book",
+        phase: action,
+        index: index + 1,
+        total: changedSnapshots.length,
+        assetId: snapshot.book.assetId,
+        title: snapshot.book.title,
+        format: snapshot.book.format,
+      });
 
       const previousAssetState = previousStateAssets[snapshot.book.assetId];
       try {
@@ -1006,6 +1053,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
       } catch (error: unknown) {
         const reason = error instanceof Error ? error.message : "unknown error";
         errors.push({ title: snapshot.book.title, reason });
+        options.onProgress?.({ type: "warning", title: snapshot.book.title, message: reason });
         stats.failedBooks += 1;
         if (!options.dryRun) {
           await removeDirectoryIfExists(path.join(stagingRoot, "assets", "pdf", snapshot.book.assetId));
@@ -1035,6 +1083,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
           } catch (error: unknown) {
             const reason = error instanceof Error ? error.message : "unknown error";
             errors.push({ title: previousAsset.title, reason });
+            options.onProgress?.({ type: "warning", title: previousAsset.title, message: reason });
             continue;
           }
         }
@@ -1086,6 +1135,14 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
       log("warn", `book failed: "${error.title}" -> ${error.reason}`);
     }
   }
+
+  options.onProgress?.({
+    type: "complete",
+    successBooks: stats.successBooks,
+    failedBooks: stats.failedBooks,
+    skippedBooks: stats.skippedBooks,
+    generatedFiles: stats.generatedFiles,
+  });
 
   return { stats, outputDir };
 }

@@ -17,10 +17,12 @@ test("normalizePluginSettings accepts plugin settings", () => {
     managedDirName: "Books",
     pdfBetaEnabled: false,
     pdfRenderBackend: "swift",
+    absyncPath: " /opt/homebrew/bin/absync ",
   });
   assert.equal(settings.managedDirName, "Books");
   assert.equal(settings.pdfBetaEnabled, false);
   assert.equal(settings.pdfRenderBackend, "swift");
+  assert.equal(settings.absyncPath, "/opt/homebrew/bin/absync");
 });
 
 test("pluginSettingsToSyncConfig maps settings to vault scoped sync config", () => {

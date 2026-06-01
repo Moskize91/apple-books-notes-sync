@@ -10,6 +10,7 @@ export type PluginSettings = {
   managedDirName: string;
   pdfBetaEnabled: boolean;
   pdfRenderBackend: PdfRenderBackend;
+  absyncPath?: string;
 };
 
 type RawPluginSettings = Partial<PluginSettings>;
@@ -29,10 +30,16 @@ export function normalizePluginSettings(raw: RawPluginSettings | null | undefine
       ? raw.managedDirName
       : defaults.managedDirName;
 
+  const absyncPath =
+    typeof raw?.absyncPath === "string" && raw.absyncPath.trim().length > 0
+      ? raw.absyncPath.trim()
+      : undefined;
+
   return {
     managedDirName,
     pdfBetaEnabled: raw?.pdfBetaEnabled ?? defaults.pdfBetaEnabled,
     pdfRenderBackend: parsePdfRenderBackend(raw?.pdfRenderBackend, defaults.pdfRenderBackend),
+    ...(absyncPath ? { absyncPath } : {}),
   };
 }
 
