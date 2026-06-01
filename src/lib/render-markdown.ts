@@ -1,6 +1,8 @@
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Book, EpubAnnotation, SyncAssetState } from "./types";
 import { normalizeQuoteText } from "./quote-normalize";
+import { BOOK_INTERACTIVE_PROPERTY_DEFAULTS, BOOK_PROPERTY_KEYS } from "./book-properties";
 
 type PdfRenderedNote = {
   marker: string | null;
@@ -20,6 +22,7 @@ type FrontmatterDateTime = {
   value: Date;
 };
 type FrontmatterValue = string | number | boolean | FrontmatterDateTime;
+type FrontmatterProperty = [string, FrontmatterValue | null];
 const LOCATION_SORT_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
 function fmtDate(date: Date): string {
@@ -100,7 +103,7 @@ function toYamlScalar(value: FrontmatterValue): string {
   return String(value);
 }
 
-function pushFrontmatter(lines: string[], properties: Array<[string, FrontmatterValue | null]>): void {
+function pushFrontmatter(lines: string[], properties: FrontmatterProperty[]): void {
   lines.push("---");
   for (const [key, value] of properties) {
     if (value === null) {
@@ -110,6 +113,12 @@ function pushFrontmatter(lines: string[], properties: Array<[string, Frontmatter
   }
   lines.push("---");
   lines.push("");
+}
+
+export function renderBookFrontmatterMarkdown(properties: FrontmatterProperty[]): string {
+  const lines: string[] = [];
+  pushFrontmatter(lines, properties);
+  return lines.join("\n");
 }
 
 function toDisplayChapterKey(rawChapterKey: string, chapterTitleByKey?: Map<string, string>): string {
@@ -217,7 +226,7 @@ function buildPdfStandardPageLink(book: Book, pageNumber: number): string {
     return "#";
   }
   const absolutePath = path.isAbsolute(book.path) ? book.path : path.resolve(book.path);
-  return `${absolutePath}#page=${pageNumber}`;
+  return `${pathToFileURL(absolutePath).href}#page=${pageNumber}`;
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -241,16 +250,7 @@ export function renderEpubBookMarkdown(
   coverImagePropertyValue?: string | null,
 ): string {
   const lines: string[] = [];
-  pushFrontmatter(lines, [
-    ["title", book.title],
-    ["author", book.author ?? "-"],
-    ["publisher", book.publisher],
-    ["format", "EPUB"],
-    ["annotation_count", annotations.length],
-    ["last_modified_at", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
-    ["cover", coverImagePropertyValue ?? null],
-    ["source_file", book.path],
-  ]);
+  pushFrontmatter(lines, getEpubBookProperties(book, annotations.length, coverImagePropertyValue));
 
   if (annotations.length === 0) {
     lines.push("> 本书暂无可同步的 EPUB 标注。");
@@ -320,6 +320,27 @@ export function renderEpubBookMarkdown(
   return lines.join("\n");
 }
 
+export function getEpubBookProperties(
+  book: Book,
+  annotationCount: number,
+  coverImagePropertyValue?: string | null,
+): FrontmatterProperty[] {
+  return [
+    [BOOK_PROPERTY_KEYS.title, book.title],
+    [BOOK_PROPERTY_KEYS.author, book.author ?? "-"],
+    [BOOK_PROPERTY_KEYS.publisher, book.publisher],
+    [BOOK_PROPERTY_KEYS.format, "EPUB"],
+    [BOOK_PROPERTY_KEYS.syncPaused, BOOK_INTERACTIVE_PROPERTY_DEFAULTS.sync_paused],
+    [BOOK_PROPERTY_KEYS.annotationCount, annotationCount],
+    [
+      BOOK_PROPERTY_KEYS.lastModifiedAt,
+      book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null,
+    ],
+    [BOOK_PROPERTY_KEYS.cover, coverImagePropertyValue ?? null],
+    [BOOK_PROPERTY_KEYS.sourceFile, book.path],
+  ];
+}
+
 export function renderPdfBookMarkdown(
   book: Book,
   pages: PdfRenderedPage[],
@@ -327,17 +348,7 @@ export function renderPdfBookMarkdown(
   sourceModifiedAt?: Date | null,
 ): string {
   const lines: string[] = [];
-  pushFrontmatter(lines, [
-    ["title", book.title],
-    ["author", book.author ?? "-"],
-    ["publisher", book.publisher],
-    ["format", "PDF"],
-    ["pdf_beta", true],
-    ["annotated_pages", pages.length],
-    ["last_modified_at", sourceModifiedAt ? { type: "datetime", value: sourceModifiedAt } : null],
-    ["cover", coverImagePropertyValue ?? null],
-    ["source_file", book.path],
-  ]);
+  pushFrontmatter(lines, getPdfBookProperties(book, pages.length, coverImagePropertyValue, sourceModifiedAt));
 
   if (pages.length === 0) {
     lines.push("> 本书暂无可同步的 PDF 标注。");
@@ -389,6 +400,25 @@ export function renderPdfBookMarkdown(
   }
 
   return lines.join("\n");
+}
+
+export function getPdfBookProperties(
+  book: Book,
+  annotatedPages: number,
+  coverImagePropertyValue?: string | null,
+  sourceModifiedAt?: Date | null,
+): FrontmatterProperty[] {
+  return [
+    [BOOK_PROPERTY_KEYS.title, book.title],
+    [BOOK_PROPERTY_KEYS.author, book.author ?? "-"],
+    [BOOK_PROPERTY_KEYS.publisher, book.publisher],
+    [BOOK_PROPERTY_KEYS.format, "PDF"],
+    [BOOK_PROPERTY_KEYS.syncPaused, BOOK_INTERACTIVE_PROPERTY_DEFAULTS.sync_paused],
+    [BOOK_PROPERTY_KEYS.annotatedPages, annotatedPages],
+    [BOOK_PROPERTY_KEYS.lastModifiedAt, sourceModifiedAt ? { type: "datetime", value: sourceModifiedAt } : null],
+    [BOOK_PROPERTY_KEYS.cover, coverImagePropertyValue ?? null],
+    [BOOK_PROPERTY_KEYS.sourceFile, book.path],
+  ];
 }
 
 function pushPdfNoteBlock(lines: string[], note: PdfRenderedNote, markerLabel: string | null): void {

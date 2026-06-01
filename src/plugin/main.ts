@@ -944,32 +944,27 @@ class AppleBooksNotesSyncSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("PDF rendering")
-      .setDesc("Generate PDF note page images when PDF annotations are synced.")
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.pdfBetaEnabled).onChange((value) => {
-          void (async () => {
-            this.plugin.settings.pdfBetaEnabled = value;
-            await this.plugin.saveSettings();
-          })();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("PDF renderer")
-      .setDesc("External renderer used for PDF page images.")
+      .setName("PDF notes")
+      .setDesc("Controls whether PDF annotations are synced and which renderer is used for PDF page images.")
       .addDropdown((dropdown) => {
         dropdown
           .addOptions({
+            disabled: "disabled",
             auto: "auto",
             swift: "swift",
-            mutool: "mutool",
-            poppler: "poppler",
+            mutool: "MuPDF",
+            poppler: "Poppler",
           })
-          .setValue(this.plugin.settings.pdfRenderBackend)
+          .setValue(this.plugin.settings.syncPdfNotes ? this.plugin.settings.pdfRenderBackend : "disabled")
           .onChange((value) => {
             void (async () => {
-              this.plugin.settings.pdfRenderBackend = value as PdfRenderBackend;
+              if (value === "disabled") {
+                this.plugin.settings.syncPdfNotes = false;
+                this.plugin.settings.pdfRenderBackend = "auto";
+              } else {
+                this.plugin.settings.syncPdfNotes = true;
+                this.plugin.settings.pdfRenderBackend = value as PdfRenderBackend;
+              }
               await this.plugin.saveSettings();
             })();
           });

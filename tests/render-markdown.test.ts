@@ -324,7 +324,7 @@ test("renderPdfBookMarkdown renders single text note directly", () => {
   assert.doesNotMatch(output, /last_modified_at: 2026-05-30T04:34:56/);
   assert.match(
     output,
-    /<p align="center"><img src="\.\.\/assets\/pdf\/asset-id\/page-8\.png" alt="第8页" \/> <a href="\/tmp\/demo\.pdf#page=8">第 8 页<\/a><\/p>/,
+    /<p align="center"><img src="\.\.\/assets\/pdf\/asset-id\/page-8\.png" alt="第8页" \/> <a href="file:\/\/\/tmp\/demo\.pdf#page=8">第 8 页<\/a><\/p>/,
   );
   assert.match(output, /> 单条原文内容/);
   assert.match(output, /\n ?单条笔记内容\n/);

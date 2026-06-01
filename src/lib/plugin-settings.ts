@@ -8,17 +8,19 @@ export const DEFAULT_MANAGED_DIR_NAME = "Apple Books Notes";
 
 export type PluginSettings = {
   managedDirName: string;
-  pdfBetaEnabled: boolean;
+  syncPdfNotes: boolean;
   pdfRenderBackend: PdfRenderBackend;
   absyncPath?: string;
 };
 
-type RawPluginSettings = Partial<PluginSettings>;
+type RawPluginSettings = Partial<PluginSettings> & {
+  pdfBetaEnabled?: boolean;
+};
 
 export function getDefaultPluginSettings(): PluginSettings {
   return {
     managedDirName: DEFAULT_MANAGED_DIR_NAME,
-    pdfBetaEnabled: true,
+    syncPdfNotes: true,
     pdfRenderBackend: "auto",
   };
 }
@@ -37,7 +39,7 @@ export function normalizePluginSettings(raw: RawPluginSettings | null | undefine
 
   return {
     managedDirName,
-    pdfBetaEnabled: raw?.pdfBetaEnabled ?? defaults.pdfBetaEnabled,
+    syncPdfNotes: raw?.syncPdfNotes ?? raw?.pdfBetaEnabled ?? defaults.syncPdfNotes,
     pdfRenderBackend: parsePdfRenderBackend(raw?.pdfRenderBackend, defaults.pdfRenderBackend),
     ...(absyncPath ? { absyncPath } : {}),
   };
@@ -47,7 +49,7 @@ export function pluginSettingsToSyncConfig(vaultDir: string, settings: PluginSet
   return {
     vaultDir: path.resolve(vaultDir),
     managedDirName: settings.managedDirName,
-    pdfBetaEnabled: settings.pdfBetaEnabled,
+    syncPdfNotes: settings.syncPdfNotes,
     pdfRenderBackend: settings.pdfRenderBackend,
   };
 }

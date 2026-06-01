@@ -18,7 +18,7 @@ export type Rect = {
 export type SyncConfig = {
   vaultDir: string;
   managedDirName: string;
-  pdfBetaEnabled: boolean;
+  syncPdfNotes: boolean;
   pdfRenderBackend: PdfRenderBackend;
 };
 
