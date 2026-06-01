@@ -1,10 +1,12 @@
 import type { Command } from "commander";
+import { setLogHandler } from "../lib/logger";
 import { runSync } from "../lib/sync";
 import { loadCommandContext, printCommandError } from "./context";
 
 type SyncOptions = {
   dryRun?: boolean;
   book?: string;
+  json?: boolean;
   vault?: string;
 };
 
@@ -17,6 +19,7 @@ export function registerSyncCommand(program: Command): void {
     .option("--vault <selector>", "target vault id, vault name, or path")
     .option("--dry-run", "preview changes without writing files")
     .option("--book <keyword>", "sync only books matching keyword, title, author, or asset id")
+    .option("--json", "print machine-readable JSON output")
     .addHelpText(
       "after",
       `
@@ -67,7 +70,32 @@ Examples:
           syncOptions.bookFilter = options.book;
         }
 
-        const result = await runSync(config, paths, syncOptions);
+        const restoreLogHandler = options.json
+          ? setLogHandler((level, message) => {
+              const prefix = level.toUpperCase();
+              console.error(`[${prefix}] ${message}`);
+            })
+          : null;
+        let result: Awaited<ReturnType<typeof runSync>>;
+        try {
+          result = await runSync(config, paths, syncOptions);
+        } finally {
+          restoreLogHandler?.();
+        }
+
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              {
+                outputDir: result.outputDir,
+                summary: result.stats,
+              },
+              null,
+              2,
+            ),
+          );
+          return;
+        }
 
         const prefix = options.dryRun ? "dry-run" : "sync";
         console.log(
