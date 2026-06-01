@@ -759,16 +759,22 @@ export async function overlayPdfAnnotationNumbers(
 
   const overlaySvg = toOverlaySvg(width, height, pageWidth, pageHeight, annotations);
   const overlayPath = `${imagePath}.overlay.svg`;
+  const overlayPngPath = `${imagePath}.overlay-layer.png`;
   const outputPath = `${imagePath}.overlay.png`;
   try {
     fs.writeFileSync(overlayPath, overlaySvg, "utf8");
-    execFileSync(pdfCommands.magick, [imagePath, overlayPath, "-compose", "over", "-composite", outputPath], {
+    execFileSync(pdfCommands.magick, ["-background", "none", overlayPath, overlayPngPath], {
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    execFileSync(pdfCommands.magick, [imagePath, overlayPngPath, "-compose", "over", "-composite", outputPath], {
       encoding: "utf8",
       maxBuffer: 8 * 1024 * 1024,
     });
     fs.renameSync(outputPath, imagePath);
   } finally {
     fs.rmSync(overlayPath, { force: true });
+    fs.rmSync(overlayPngPath, { force: true });
     fs.rmSync(outputPath, { force: true });
   }
 }
