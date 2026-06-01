@@ -8,8 +8,12 @@ type VaultModule = typeof import("../src/lib/vault");
 
 async function withTempObsidianHome<T>(run: (vault: VaultModule, homeDir: string) => Promise<T>): Promise<T> {
   const previousHome = process.env.HOME;
+  const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
+  const previousAppData = process.env.APPDATA;
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "apple-books-vault-"));
   process.env.HOME = homeDir;
+  process.env.XDG_CONFIG_HOME = path.join(homeDir, ".config");
+  process.env.APPDATA = path.join(homeDir, "AppData", "Roaming");
   try {
     const vault = (await import(`../src/lib/vault?home=${Date.now()}-${Math.random()}`)) as VaultModule;
     return await run(vault, homeDir);
@@ -19,8 +23,28 @@ async function withTempObsidianHome<T>(run: (vault: VaultModule, homeDir: string
     } else {
       process.env.HOME = previousHome;
     }
+    if (previousXdgConfigHome === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
+    }
+    if (previousAppData === undefined) {
+      delete process.env.APPDATA;
+    } else {
+      process.env.APPDATA = previousAppData;
+    }
     await fs.rm(homeDir, { recursive: true, force: true });
   }
+}
+
+function getTestObsidianConfigDir(homeDir: string): string {
+  if (process.platform === "darwin") {
+    return path.join(homeDir, "Library", "Application Support", "obsidian");
+  }
+  if (process.platform === "win32") {
+    return path.join(homeDir, "AppData", "Roaming", "Obsidian");
+  }
+  return path.join(homeDir, ".config", "obsidian");
 }
 
 async function createVault(homeDir: string, id: string, name: string, enabled = true): Promise<string> {
@@ -36,7 +60,7 @@ async function createVault(homeDir: string, id: string, name: string, enabled = 
     JSON.stringify(enabled ? ["apple-books-notes-sync"] : []),
     "utf8",
   );
-  const obsidianDir = path.join(homeDir, "Library", "Application Support", "obsidian");
+  const obsidianDir = getTestObsidianConfigDir(homeDir);
   await fs.mkdir(obsidianDir, { recursive: true });
   let data = { vaults: {} as Record<string, { path: string; open: boolean }> };
   try {
