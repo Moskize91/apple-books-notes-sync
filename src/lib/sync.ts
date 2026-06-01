@@ -39,6 +39,7 @@ import type {
   SyncAssetState,
   SyncStats,
   SyncableBookFormat,
+  PdfPageAnnotations,
 } from "./types";
 
 export type SyncProgressEvent =
@@ -256,6 +257,27 @@ async function isBookSourceAvailable(book: Book): Promise<boolean> {
     return false;
   }
   return pathExists(book.path);
+}
+
+export function hasRenderablePdfPageAnnotations(pages: PdfPageAnnotations[]): boolean {
+  for (const page of pages) {
+    for (const annotation of sortPdfAnnotations(page.annotations)) {
+      if (extractPdfQuoteContent(annotation).length > 0 || extractPdfUserNoteContent(annotation).length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function hasRenderablePdfFileAnnotations(pdfPath: string): Promise<boolean> {
+  try {
+    return hasRenderablePdfPageAnnotations(await extractPdfPageAnnotations(pdfPath));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "unknown error";
+    log("warn", `failed to inspect PDF annotations: ${message}`);
+    return false;
+  }
 }
 
 function toSyncStateAsset(
@@ -538,6 +560,7 @@ async function buildBookFingerprint(
   annotationMaxModificationDates: Map<string, number | null>,
   epubRenderableCounts: Map<string, number>,
   previousStateAssets: Record<string, SyncAssetState>,
+  pdfBetaEnabled: boolean,
 ): Promise<BookFingerprint> {
   const previous = previousStateAssets[book.assetId];
   const annotationModifiedAtForHash =
@@ -562,9 +585,14 @@ async function buildBookFingerprint(
     shouldHaveOutput =
       (epubRenderableCounts.get(book.assetId) ?? 0) > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
   } else if (previous && previous.hash === hash) {
-    shouldHaveOutput = previous.bookFileRelativePath !== null;
+    shouldHaveOutput =
+      previous.bookFileRelativePath !== null ||
+      (pdfBetaEnabled && Boolean(book.path) && (await hasRenderablePdfFileAnnotations(book.path!)));
   } else {
-    shouldHaveOutput = book.annotationCount > 0 || Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath);
+    shouldHaveOutput =
+      book.annotationCount > 0 ||
+      Boolean(previousStateAssets[book.assetId]?.bookFileRelativePath) ||
+      (pdfBetaEnabled && Boolean(book.path) && (await hasRenderablePdfFileAnnotations(book.path!)));
   }
 
   return {
@@ -630,7 +658,13 @@ export async function buildSyncPlan(
   );
   const epubRenderableCounts = readEpubRenderableCounts(paths.annotationDbPath, paths.libraryDbPath);
   const allBookFingerprints = await mapConcurrent(books, 2, (book) => {
-    return buildBookFingerprint(book, annotationMaxModificationDates, epubRenderableCounts, previousState.assets);
+    return buildBookFingerprint(
+      book,
+      annotationMaxModificationDates,
+      epubRenderableCounts,
+      previousState.assets,
+      config.pdfBetaEnabled,
+    );
   });
   const fingerprintByAssetId = new Map<string, BookFingerprint>();
   const hasOutputByAssetId = new Map<string, boolean>();
