@@ -107,7 +107,10 @@ export function readBooks(
         ZANNOTATIONASSETID AS assetId,
         COUNT(*) AS annotationCount
       FROM anno.ZAEANNOTATION
-      WHERE ZANNOTATIONDELETED IS NULL OR ZANNOTATIONDELETED = 0
+      WHERE (ZANNOTATIONDELETED IS NULL OR ZANNOTATIONDELETED = 0)
+        AND ZANNOTATIONASSETID IN (
+          SELECT ZASSETID FROM ZBKLIBRARYASSET WHERE ZCONTENTTYPE = 1
+        )
       GROUP BY ZANNOTATIONASSETID
     ) cnt ON cnt.assetId = b.ZASSETID
     LEFT JOIN (
@@ -115,7 +118,10 @@ export function readBooks(
         ZANNOTATIONASSETID AS assetId,
         MAX(ZANNOTATIONMODIFICATIONDATE) AS maxModificationDate
       FROM anno.ZAEANNOTATION
-      WHERE ZANNOTATIONDELETED IS NULL OR ZANNOTATIONDELETED = 0
+      WHERE (ZANNOTATIONDELETED IS NULL OR ZANNOTATIONDELETED = 0)
+        AND ZANNOTATIONASSETID IN (
+          SELECT ZASSETID FROM ZBKLIBRARYASSET WHERE ZCONTENTTYPE = 1
+        )
       GROUP BY ZANNOTATIONASSETID
     ) mod ON mod.assetId = b.ZASSETID
     ${maybeJoinEpub}
@@ -126,15 +132,16 @@ export function readBooks(
   const rows = querySqlite<RawBookRow>(libraryDbPath, sql);
 
   return rows.map((row) => {
+    const format = toFormat(row.contentType);
     return {
       assetId: row.assetId,
       title: normalizeNullableText(row.title) ?? `Unknown-${row.assetId.slice(0, 8)}`,
       author: normalizeNullableText(row.author),
       publisher: normalizeNullableText(row.publisher),
       path: normalizeNullableText(row.path),
-      format: toFormat(row.contentType),
-      annotationCount: Number(row.annotationCount ?? 0),
-      annotationModifiedAt: toNullableDateFromAppleEpoch(row.maxModificationDate),
+      format,
+      annotationCount: format === "EPUB" ? Number(row.annotationCount ?? 0) : null,
+      annotationModifiedAt: format === "EPUB" ? toNullableDateFromAppleEpoch(row.maxModificationDate) : null,
     };
   });
 }
@@ -228,7 +235,7 @@ export function readEpubRenderableCounts(annotationDbPath: string, libraryDbPath
   return result;
 }
 
-export function readAnnotationMaxModificationDates(
+export function readEpubAnnotationMaxModificationDates(
   annotationDbPath: string,
   libraryDbPath: string,
 ): Map<string, number | null> {
@@ -240,7 +247,7 @@ export function readAnnotationMaxModificationDates(
     FROM ZAEANNOTATION a
     INNER JOIN lib.ZBKLIBRARYASSET b ON b.ZASSETID = a.ZANNOTATIONASSETID
     WHERE (a.ZANNOTATIONDELETED IS NULL OR a.ZANNOTATIONDELETED = 0)
-      AND b.ZCONTENTTYPE IN (1, 3)
+      AND b.ZCONTENTTYPE = 1
     GROUP BY a.ZANNOTATIONASSETID;
   `;
 

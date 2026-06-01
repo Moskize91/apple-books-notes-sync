@@ -38,7 +38,7 @@ export type Book = {
   publisher: string | null;
   path: string | null;
   format: BookFormat;
-  annotationCount: number;
+  annotationCount: number | null;
   annotationModifiedAt: Date | null;
 };
 
