@@ -185,6 +185,7 @@ export type SyncPlan = {
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
 const OUTPUT_SCHEMA_VERSION = 41;
+const PDF_PAGE_LINK_SCHEMA_VERSION = 5;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 
@@ -596,7 +597,10 @@ async function buildBookFingerprint(
   const pdfSourceModifiedAt =
     pdfFileStamp && pdfFileStamp !== "missing" ? new Date(pdfFileStamp.mtimeMs) : null;
   const baseHash = buildBookSyncHash(book.format, annotationModifiedAtForHash, pdfFileStamp);
-  const hash = `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}`;
+  const hash =
+    book.format === "PDF"
+      ? `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}|pdf-link:${PDF_PAGE_LINK_SCHEMA_VERSION}`
+      : `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}`;
   let shouldHaveOutput: boolean;
   if (book.format === "EPUB") {
     shouldHaveOutput =
@@ -635,6 +639,7 @@ function renderBookMarkdownForSnapshot(
   epubChapterOrderByKey: Map<string, number> | undefined,
   pdfPages: PdfPageRenderItem[],
   coverImagePropertyValue: string | null,
+  vaultName: string | null,
 ): string {
   return snapshot.book.format === "EPUB"
     ? renderEpubBookMarkdown(
@@ -649,6 +654,7 @@ function renderBookMarkdownForSnapshot(
         pdfPages,
         coverImagePropertyValue,
         snapshot.pdfSourceModifiedAt,
+        vaultName,
       );
 }
 
@@ -675,7 +681,7 @@ function readExistingPdfAnnotatedPages(markdown: string | null): number {
     return 0;
   }
 
-  const matches = markdown.match(/<a href="[^"]*#page=\d+">第 \d+ 页<\/a>/g);
+  const matches = markdown.match(/<a href="[^"]*">第 \d+ 页<\/a>/g);
   return matches?.length ?? 0;
 }
 
@@ -932,6 +938,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
   } = plan;
   const stagingRoot = path.join(outputDir, ".staging", `${Date.now()}-${process.pid}`);
   const syncStartedAt = new Date().toISOString();
+  const vaultName = path.basename(path.resolve(config.vaultDir));
 
   const stats: SyncStats = {
     totalBooks: plan.stats.totalBooks,
@@ -1126,6 +1133,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
             epubChapterOrderByKey,
             pdfPages,
             coverImagePropertyValue,
+            vaultName,
           );
         }
 

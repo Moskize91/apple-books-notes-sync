@@ -1,6 +1,7 @@
 export type BookFormat = "EPUB" | "PDF" | "IBOOKS" | "UNKNOWN";
 export type SyncableBookFormat = "EPUB" | "PDF";
 export type PdfRenderBackend = "auto" | "swift" | "mutool" | "poppler";
+export type PdfPageLinkTarget = "default" | "edge" | "chrome";
 
 export type LogLevel = "info" | "warn" | "error";
 
@@ -20,6 +21,7 @@ export type SyncConfig = {
   managedDirName: string;
   syncPdfNotes: boolean;
   pdfRenderBackend: PdfRenderBackend;
+  pdfPageLinkTarget: PdfPageLinkTarget;
 };
 
 export type CliConfig = SyncConfig;

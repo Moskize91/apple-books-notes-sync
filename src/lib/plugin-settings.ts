@@ -1,15 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { parsePdfRenderBackend } from "./config";
-import type { PdfRenderBackend, SyncConfig } from "./types";
+import { parsePdfPageLinkTarget, parsePdfRenderBackend } from "./config";
+import { PLUGIN_ID } from "./obsidian-protocol";
+import type { PdfPageLinkTarget, PdfRenderBackend, SyncConfig } from "./types";
 
-export const PLUGIN_ID = "apple-books-notes-sync";
+export { PLUGIN_ID };
 export const DEFAULT_MANAGED_DIR_NAME = "Apple Books Notes";
 
 export type PluginSettings = {
   managedDirName: string;
   syncPdfNotes: boolean;
   pdfRenderBackend: PdfRenderBackend;
+  pdfPageLinkTarget: PdfPageLinkTarget;
   absyncPath?: string;
 };
 
@@ -22,6 +24,7 @@ export function getDefaultPluginSettings(): PluginSettings {
     managedDirName: DEFAULT_MANAGED_DIR_NAME,
     syncPdfNotes: true,
     pdfRenderBackend: "auto",
+    pdfPageLinkTarget: "edge",
   };
 }
 
@@ -41,6 +44,7 @@ export function normalizePluginSettings(raw: RawPluginSettings | null | undefine
     managedDirName,
     syncPdfNotes: raw?.syncPdfNotes ?? raw?.pdfBetaEnabled ?? defaults.syncPdfNotes,
     pdfRenderBackend: parsePdfRenderBackend(raw?.pdfRenderBackend, defaults.pdfRenderBackend),
+    pdfPageLinkTarget: parsePdfPageLinkTarget(raw?.pdfPageLinkTarget, defaults.pdfPageLinkTarget),
     ...(absyncPath ? { absyncPath } : {}),
   };
 }
@@ -51,6 +55,7 @@ export function pluginSettingsToSyncConfig(vaultDir: string, settings: PluginSet
     managedDirName: settings.managedDirName,
     syncPdfNotes: settings.syncPdfNotes,
     pdfRenderBackend: settings.pdfRenderBackend,
+    pdfPageLinkTarget: settings.pdfPageLinkTarget,
   };
 }
 

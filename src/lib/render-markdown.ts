@@ -1,8 +1,8 @@
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { Book, EpubAnnotation, SyncAssetState } from "./types";
 import { normalizeQuoteText } from "./quote-normalize";
 import { BOOK_INTERACTIVE_PROPERTY_DEFAULTS, BOOK_PROPERTY_KEYS } from "./book-properties";
+import { OBSIDIAN_OPEN_PDF_ACTION } from "./obsidian-protocol";
 
 type PdfRenderedNote = {
   marker: string | null;
@@ -221,12 +221,19 @@ function buildEpubLocationLink(book: Book, location: string | null): string {
   return `ibooks://assetid/${book.assetId}#${location}`;
 }
 
-function buildPdfStandardPageLink(book: Book, pageNumber: number): string {
+function buildPdfPageLink(book: Book, pageNumber: number, vaultName?: string | null): string {
   if (!book.path) {
     return "#";
   }
-  const absolutePath = path.isAbsolute(book.path) ? book.path : path.resolve(book.path);
-  return `${pathToFileURL(absolutePath).href}#page=${pageNumber}`;
+  const params: Array<[string, string]> = [
+    ["pdf", path.isAbsolute(book.path) ? book.path : path.resolve(book.path)],
+    ["page", String(pageNumber)],
+  ];
+  if (vaultName) {
+    params.push(["vault", vaultName]);
+  }
+  const query = params.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
+  return `obsidian://${OBSIDIAN_OPEN_PDF_ACTION}?${query}`;
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -346,6 +353,7 @@ export function renderPdfBookMarkdown(
   pages: PdfRenderedPage[],
   coverImagePropertyValue?: string | null,
   sourceModifiedAt?: Date | null,
+  vaultName?: string | null,
 ): string {
   const lines: string[] = [];
   pushFrontmatter(lines, getPdfBookProperties(book, pages.length, coverImagePropertyValue, sourceModifiedAt));
@@ -366,12 +374,12 @@ export function renderPdfBookMarkdown(
     if (page.imageRelativePath) {
       const pageLinkPath = path.posix.join("..", page.imageRelativePath);
       const escapedImagePath = escapeHtmlAttr(pageLinkPath);
-      const escapedPageLink = escapeHtmlAttr(buildPdfStandardPageLink(book, page.pageNumber));
+      const escapedPageLink = escapeHtmlAttr(buildPdfPageLink(book, page.pageNumber, vaultName));
       lines.push(
         `<p align="center"><img src="${escapedImagePath}" alt="第${page.pageNumber}页" /> <a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`,
       );
     } else {
-      const escapedPageLink = escapeHtmlAttr(buildPdfStandardPageLink(book, page.pageNumber));
+      const escapedPageLink = escapeHtmlAttr(buildPdfPageLink(book, page.pageNumber, vaultName));
       lines.push(`<p align="center"><a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`);
     }
     lines.push("");

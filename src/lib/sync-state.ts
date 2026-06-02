@@ -7,6 +7,7 @@ const STATE_FILE_NAME = ".sync-state.json";
 const STATE_DIR_NAME = ".absync";
 const SQLITE_STATE_FILE_NAME = "state.sqlite";
 const LOCK_FILE_NAME = "lock";
+const LOCK_ACQUIRE_ATTEMPTS = 2;
 
 type PdfFileStamp = {
   mtimeMs: number;
@@ -166,21 +167,72 @@ export async function writeSyncState(outputDir: string, assets: Record<string, S
   );
 }
 
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError?.code === "ESRCH") {
+      return false;
+    }
+    if (nodeError?.code === "EPERM") {
+      return true;
+    }
+    return true;
+  }
+}
+
+async function readLockPid(lockPath: string): Promise<number | null> {
+  try {
+    const raw = await fs.readFile(lockPath, "utf8");
+    const firstLine = raw.split(/\r?\n/, 1)[0];
+    const pid = Number(firstLine);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+async function removeLockIfStale(lockPath: string): Promise<boolean> {
+  const pid = await readLockPid(lockPath);
+  if (pid !== null && isProcessAlive(pid)) {
+    return false;
+  }
+  await fs.rm(lockPath, { force: true });
+  return true;
+}
+
 export async function acquireSyncLock(outputDir: string): Promise<() => Promise<void>> {
   await fs.mkdir(getSyncStateDir(outputDir), { recursive: true });
   const lockPath = path.join(getSyncStateDir(outputDir), LOCK_FILE_NAME);
 
   let handle;
-  try {
-    handle = await fs.open(lockPath, "wx");
-  } catch (error: unknown) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError?.code === "EEXIST") {
-      const wrapped = new Error("Another sync process is running. Remove .absync/lock if no sync is active.");
-      (wrapped as Error & { cause?: unknown }).cause = error;
-      throw wrapped;
+  for (let attempt = 0; attempt < LOCK_ACQUIRE_ATTEMPTS; attempt += 1) {
+    try {
+      handle = await fs.open(lockPath, "wx");
+      break;
+    } catch (error: unknown) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError?.code === "EEXIST") {
+        if (await removeLockIfStale(lockPath)) {
+          continue;
+        }
+        const pid = await readLockPid(lockPath);
+        const detail = pid === null ? "" : ` (pid ${pid})`;
+        const wrapped = new Error(`Another sync process is running${detail}. Remove .absync/lock if no sync is active.`);
+        (wrapped as Error & { cause?: unknown }).cause = error;
+        throw wrapped;
+      }
+      throw error;
     }
-    throw error;
+  }
+
+  if (!handle) {
+    throw new Error("Failed to acquire sync lock.");
   }
 
   await handle.writeFile(`${process.pid}\n${new Date().toISOString()}\n`, "utf8");

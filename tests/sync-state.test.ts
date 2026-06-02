@@ -4,7 +4,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  acquireSyncLock,
   buildBookSyncHash,
+  getSyncStateDir,
   getSyncStatePath,
   getSyncStateSqlitePath,
   readSyncState,
@@ -86,6 +88,38 @@ test("readSyncState migrates legacy JSON state when sqlite state is missing", as
 
     const state = await readSyncState(tempDir);
     assert.equal(state.assets.legacy?.title, "Legacy");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("acquireSyncLock removes stale lock when recorded process is gone", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "apple-books-sync-state-"));
+  try {
+    const stateDir = getSyncStateDir(tempDir);
+    const lockPath = path.join(stateDir, "lock");
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.writeFile(lockPath, "99999999\n2026-06-01T00:00:00.000Z\n", "utf8");
+
+    const release = await acquireSyncLock(tempDir);
+    const lock = await fs.readFile(lockPath, "utf8");
+    assert.match(lock, new RegExp(`^${process.pid}\\n`));
+
+    await release();
+    assert.equal(await fileExists(lockPath), false);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("acquireSyncLock rejects lock owned by a live process", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "apple-books-sync-state-"));
+  try {
+    const stateDir = getSyncStateDir(tempDir);
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.writeFile(path.join(stateDir, "lock"), `${process.pid}\n2026-06-01T00:00:00.000Z\n`, "utf8");
+
+    await assert.rejects(() => acquireSyncLock(tempDir), /Another sync process is running \(pid \d+\)/);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
