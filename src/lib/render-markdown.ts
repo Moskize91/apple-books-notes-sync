@@ -221,14 +221,23 @@ function buildEpubLocationLink(book: Book, location: string | null): string {
   return `ibooks://assetid/${book.assetId}#${location}`;
 }
 
-function buildPdfPageLink(book: Book, pageNumber: number, vaultName?: string | null): string {
+function buildEpubOpenUrl(book: Book): string {
+  return `ibooks://assetid/${book.assetId}`;
+}
+
+function buildMarkdownLink(label: string, url: string): string {
+  const escapedLabel = label.replace(/\\/g, "\\\\").replace(/]/g, "\\]").replace(/\s+/g, " ").trim();
+  return `[${escapedLabel}](<${url}>)`;
+}
+
+function buildPdfOpenUrl(book: Book, vaultName?: string | null, pageNumber?: number): string {
   if (!book.path) {
     return "#";
   }
-  const params: Array<[string, string]> = [
-    ["pdf", path.isAbsolute(book.path) ? book.path : path.resolve(book.path)],
-    ["page", String(pageNumber)],
-  ];
+  const params: Array<[string, string]> = [["pdf", path.isAbsolute(book.path) ? book.path : path.resolve(book.path)]];
+  if (pageNumber) {
+    params.push(["page", String(pageNumber)]);
+  }
   if (vaultName) {
     params.push(["vault", vaultName]);
   }
@@ -345,6 +354,7 @@ export function getEpubBookProperties(
     ],
     [BOOK_PROPERTY_KEYS.cover, coverImagePropertyValue ?? null],
     [BOOK_PROPERTY_KEYS.sourceFile, book.path],
+    [BOOK_PROPERTY_KEYS.openUrl, buildMarkdownLink(book.title, buildEpubOpenUrl(book))],
   ];
 }
 
@@ -374,12 +384,12 @@ export function renderPdfBookMarkdown(
     if (page.imageRelativePath) {
       const pageLinkPath = path.posix.join("..", page.imageRelativePath);
       const escapedImagePath = escapeHtmlAttr(pageLinkPath);
-      const escapedPageLink = escapeHtmlAttr(buildPdfPageLink(book, page.pageNumber, vaultName));
+      const escapedPageLink = escapeHtmlAttr(buildPdfOpenUrl(book, vaultName, page.pageNumber));
       lines.push(
         `<p align="center"><img src="${escapedImagePath}" alt="第${page.pageNumber}页" /> <a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`,
       );
     } else {
-      const escapedPageLink = escapeHtmlAttr(buildPdfPageLink(book, page.pageNumber, vaultName));
+      const escapedPageLink = escapeHtmlAttr(buildPdfOpenUrl(book, vaultName, page.pageNumber));
       lines.push(`<p align="center"><a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`);
     }
     lines.push("");
@@ -426,6 +436,7 @@ export function getPdfBookProperties(
     [BOOK_PROPERTY_KEYS.lastModifiedAt, sourceModifiedAt ? { type: "datetime", value: sourceModifiedAt } : null],
     [BOOK_PROPERTY_KEYS.cover, coverImagePropertyValue ?? null],
     [BOOK_PROPERTY_KEYS.sourceFile, book.path],
+    [BOOK_PROPERTY_KEYS.openUrl, buildMarkdownLink(book.title, buildPdfOpenUrl(book))],
   ];
 }
 

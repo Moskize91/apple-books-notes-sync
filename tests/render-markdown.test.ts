@@ -118,6 +118,7 @@ test("renderEpubBookMarkdown groups by chapter", () => {
   assert.match(output, /format: "EPUB"/);
   assert.match(output, /annotation_count: 1/);
   assert.match(output, /last_modified_at: 2026-05-30T04:34:56/);
+  assert.match(output, /open_url: "\[Demo Book\]\(<ibooks:\/\/assetid\/ABCDEF0123456789>\)"/);
   assert.match(output, /## 未分章/);
   assert.doesNotMatch(output, /## chapter-1\.xhtml/);
   assert.match(output, /\[2026-02-01 00:00:00\]\(<ibooks:\/\/assetid\/ABCDEF0123456789#epubcfi\(.*\)>\) Highlighted text/);
@@ -323,6 +324,10 @@ test("renderPdfBookMarkdown renders single text note directly", () => {
   assert.match(output, /---/);
   assert.match(output, /last_modified_at: 2026-05-31T01:02:03/);
   assert.doesNotMatch(output, /last_modified_at: 2026-05-30T04:34:56/);
+  assert.match(
+    output,
+    new RegExp(`open_url: "\\[Demo Book\\]\\(<obsidian:\\/\\/${OBSIDIAN_OPEN_PDF_ACTION}\\?pdf=%2Ftmp%2Fdemo\\.pdf>\\)"`),
+  );
   assert.match(
     output,
     new RegExp(

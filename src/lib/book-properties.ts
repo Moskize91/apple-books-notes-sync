@@ -10,6 +10,7 @@ export const BOOK_PROPERTY_KEYS = {
   lastModifiedAt: "last_modified_at",
   cover: "cover",
   sourceFile: "source_file",
+  openUrl: "open_url",
   syncPaused: "sync_paused",
 } as const;
 
@@ -33,6 +34,7 @@ export const BOOK_PRESET_PROPERTY_KEYS = [
   BOOK_PROPERTY_KEYS.lastModifiedAt,
   BOOK_PROPERTY_KEYS.cover,
   BOOK_PROPERTY_KEYS.sourceFile,
+  BOOK_PROPERTY_KEYS.openUrl,
   BOOK_PROPERTY_KEYS.syncPaused,
 ] as const;
 
