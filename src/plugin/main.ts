@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import {
   getPluginDir,
@@ -9,7 +10,8 @@ import {
   normalizePluginSettings,
   type PluginSettings,
 } from "../lib/plugin-settings";
-import type { PdfRenderBackend, SyncStats, SyncableBookFormat } from "../lib/types";
+import { OBSIDIAN_OPEN_PDF_ACTION } from "../lib/obsidian-protocol";
+import type { PdfPageLinkTarget, PdfRenderBackend, SyncStats, SyncableBookFormat } from "../lib/types";
 
 type PluginCommandResult = {
   status: "success" | "warning";
@@ -152,6 +154,9 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
     this.addRibbonIcon("book-open-check", "Sync Apple Books notes", () => {
       void this.runSyncCommand(false);
     });
+    this.registerObsidianProtocolHandler(OBSIDIAN_OPEN_PDF_ACTION, (params) => {
+      void this.openPdfFromProtocol(params);
+    });
 
     this.addCommand({
       id: "sync",
@@ -182,6 +187,88 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  private async openPdfFromProtocol(params: Record<string, string | "true">): Promise<void> {
+    let pdfPath =
+      typeof params.pdf === "string"
+        ? params.pdf
+        : typeof params.pdfPath === "string"
+          ? params.pdfPath
+          : typeof params.pdfpath === "string"
+            ? params.pdfpath
+            : "";
+    if (pdfPath && !(await this.pathExists(pdfPath)) && pdfPath.includes("+")) {
+      const spacePath = pdfPath.replace(/\+/g, " ");
+      if (await this.pathExists(spacePath)) {
+        pdfPath = spacePath;
+      }
+    }
+    const page = typeof params.page === "string" ? Number.parseInt(params.page, 10) : Number.NaN;
+    if (!pdfPath) {
+      new Notice("Apple Books Notes Sync: missing PDF path.", 8000);
+      return;
+    }
+    if (!path.isAbsolute(pdfPath) || path.extname(pdfPath).toLowerCase() !== ".pdf") {
+      new Notice("Apple Books Notes Sync: PDF link points to an invalid file path.", 8000);
+      return;
+    }
+    if (!(await this.pathExists(pdfPath))) {
+      new Notice(`Apple Books Notes Sync: failed to open PDF. The file ${pdfPath} does not exist.`, 12000);
+      return;
+    }
+
+    const fileUrl = pathToFileURL(pdfPath).href;
+    const targetUrl = Number.isInteger(page) && page > 0 ? `${fileUrl}#page=${page}` : fileUrl;
+    const opener = this.settings.pdfPageLinkTarget;
+
+    try {
+      await this.openPdfUrl(targetUrl, opener);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Apple Books Notes Sync: failed to open PDF. ${message}`, 12000);
+    }
+  }
+
+  private async openPdfUrl(targetUrl: string, opener: PdfPageLinkTarget): Promise<void> {
+    if (opener === "edge" || opener === "chrome") {
+      const appName = opener === "edge" ? "Microsoft Edge" : "Google Chrome";
+      const script = `tell application ${JSON.stringify(appName)} to open location ${JSON.stringify(targetUrl)}`;
+      const browserResult = await this.runProcess("osascript", ["-e", script], this.getVaultDir(), { timeoutMs: 5000 });
+      if (browserResult.exitCode === 0) {
+        return;
+      }
+
+      const fallbackResult = await this.runProcess("open", ["-a", appName, targetUrl], this.getVaultDir(), {
+        timeoutMs: 5000,
+      });
+      if (fallbackResult.exitCode === 0) {
+        return;
+      }
+
+      const detail =
+        browserResult.stderr.trim() ||
+        browserResult.stdout.trim() ||
+        fallbackResult.stderr.trim() ||
+        fallbackResult.stdout.trim() ||
+        `exit code ${browserResult.exitCode ?? fallbackResult.exitCode ?? "unknown"}`;
+      throw new Error(detail);
+    }
+
+    const result = await this.runProcess("open", [targetUrl], this.getVaultDir(), { timeoutMs: 5000 });
+    if (result.exitCode !== 0) {
+      const detail = result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode ?? "unknown"}`;
+      throw new Error(detail);
+    }
+  }
+
+  private async pathExists(inputPath: string): Promise<boolean> {
+    try {
+      await fs.access(inputPath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private getVaultDir(): string {
@@ -288,15 +375,7 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
       },
     });
     if (result.exitCode !== 0) {
-      throw new Error(
-        [
-          `absync ${label} failed with exit code ${result.exitCode ?? "unknown"}.`,
-          result.stderr.trim(),
-          result.stdout.trim(),
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      );
+      throw new Error(this.extractCliErrorMessage(result.stderr, result.stdout, label, result.exitCode));
     }
 
     try {
@@ -320,6 +399,44 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
       lines.push("", "CLI log:", trimmedStderr);
     }
     return lines.join("\n");
+  }
+
+  private extractCliErrorMessage(
+    stderr: string,
+    stdout: string,
+    label: string,
+    exitCode: number | null,
+  ): string {
+    const stderrLines = stderr
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (const line of [...stderrLines].reverse()) {
+      try {
+        const event = JSON.parse(line) as { type?: unknown; message?: unknown };
+        if (event.type === "error" && typeof event.message === "string" && event.message.trim().length > 0) {
+          return event.message.trim();
+        }
+      } catch {
+        // Non-JSON stderr is handled by the fallback below.
+      }
+    }
+
+    const lastStderrLine = stderrLines[stderrLines.length - 1];
+    if (lastStderrLine) {
+      return lastStderrLine;
+    }
+
+    const stdoutLines = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const lastStdoutLine = stdoutLines[stdoutLines.length - 1];
+    if (lastStdoutLine) {
+      return lastStdoutLine;
+    }
+
+    return `absync ${label} failed with exit code ${exitCode ?? "unknown"}.`;
   }
 
   private createProgressParser(onProgress: (event: CliProgressEvent) => void): (chunk: string) => void {
@@ -752,10 +869,10 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
       const stack = error instanceof Error && error.stack ? error.stack : message;
       lines.push("", "FAILED", stack);
       const logPath = await this.safeWriteCommandLog(command, lines.join("\n"));
-      const details = `${lines.join("\n")}\n\nLog file: ${logPath}`;
+      const details = `${message}\n\nLog file: ${logPath}`;
       console.error(`[Apple Books Notes Sync] ${command} failed`, error);
       this.finishStatusBar(`ABS failed: ${command}`);
-      new Notice(`Apple Books Notes Sync: ${command} failed. ${message}`, 30000);
+      new Notice(`Apple Books Notes Sync: ${message}`, 30000);
       if (error instanceof CliResolutionError) {
         new CliSetupModal(this.app, `${this.buildCliSetupDetails(error.failure)}\n\n${details}`).open();
       } else {
@@ -944,32 +1061,46 @@ class AppleBooksNotesSyncSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("PDF rendering")
-      .setDesc("Generate PDF note page images when PDF annotations are synced.")
-      .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.pdfBetaEnabled).onChange((value) => {
-          void (async () => {
-            this.plugin.settings.pdfBetaEnabled = value;
-            await this.plugin.saveSettings();
-          })();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("PDF renderer")
-      .setDesc("External renderer used for PDF page images.")
+      .setName("PDF notes")
+      .setDesc("Controls whether PDF annotations are synced and which renderer is used for PDF page images.")
       .addDropdown((dropdown) => {
         dropdown
           .addOptions({
+            disabled: "disabled",
             auto: "auto",
             swift: "swift",
-            mutool: "mutool",
-            poppler: "poppler",
+            mutool: "MuPDF",
+            poppler: "Poppler",
           })
-          .setValue(this.plugin.settings.pdfRenderBackend)
+          .setValue(this.plugin.settings.syncPdfNotes ? this.plugin.settings.pdfRenderBackend : "disabled")
           .onChange((value) => {
             void (async () => {
-              this.plugin.settings.pdfRenderBackend = value as PdfRenderBackend;
+              if (value === "disabled") {
+                this.plugin.settings.syncPdfNotes = false;
+                this.plugin.settings.pdfRenderBackend = "auto";
+              } else {
+                this.plugin.settings.syncPdfNotes = true;
+                this.plugin.settings.pdfRenderBackend = value as PdfRenderBackend;
+              }
+              await this.plugin.saveSettings();
+            })();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("PDF page opener")
+      .setDesc("App used when opening a PDF page link from generated notes.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOptions({
+            edge: "Microsoft Edge",
+            chrome: "Google Chrome",
+            default: "Default app",
+          })
+          .setValue(this.plugin.settings.pdfPageLinkTarget)
+          .onChange((value) => {
+            void (async () => {
+              this.plugin.settings.pdfPageLinkTarget = value as PdfPageLinkTarget;
               await this.plugin.saveSettings();
             })();
           });

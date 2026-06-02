@@ -25,11 +25,15 @@ import {
   toPdfNoteMarker,
 } from "./pdf";
 import {
+  getEpubBookProperties,
+  getPdfBookProperties,
+  renderBookFrontmatterMarkdown,
   renderEpubBookMarkdown,
   renderIndexMarkdown,
   renderPdfBookMarkdown,
 } from "./render-markdown";
 import { acquireSyncLock, buildBookSyncHash, readSyncState, writeSyncState } from "./sync-state";
+import { hasBookMarkdownPropertyDrift, mergeBookMarkdownProperties, readBookSyncPaused } from "./book-properties";
 import type {
   Book,
   EpubAnnotation,
@@ -101,6 +105,7 @@ type BookSyncSnapshot = {
   pdfAssetDirRelativePath: string | null;
   coverImageRelativePath: string | null;
   pdfSourceModifiedAt: Date | null;
+  syncPaused: boolean;
 };
 
 type BookFingerprint = {
@@ -118,6 +123,8 @@ export type SyncPlanReason =
   | "output-path-changed"
   | "legacy-output"
   | "missing-output"
+  | "properties-changed"
+  | "sync-paused"
   | "pdf-assets-missing"
   | "cover-assets-missing"
   | "removed";
@@ -177,7 +184,8 @@ export type SyncPlan = {
 };
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
-const OUTPUT_SCHEMA_VERSION = 40;
+const OUTPUT_SCHEMA_VERSION = 44;
+const PDF_PAGE_LINK_SCHEMA_VERSION = 5;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 
@@ -354,6 +362,21 @@ async function hasMissingExpectedBookFile(outputDir: string, previous: SyncAsset
     return false;
   }
   return !(await pathExists(path.join(outputDir, previous.bookFileRelativePath)));
+}
+
+async function readPreviousBookMarkdown(
+  outputDir: string,
+  bookFileRelativePath: string | null | undefined,
+): Promise<string | null> {
+  if (!bookFileRelativePath) {
+    return null;
+  }
+
+  try {
+    return await fs.readFile(path.join(outputDir, bookFileRelativePath), "utf8");
+  } catch {
+    return null;
+  }
 }
 
 async function writeFileAtomically(filePath: string, content: string): Promise<void> {
@@ -552,7 +575,7 @@ async function buildBookFingerprint(
   epubAnnotationMaxModificationDates: Map<string, number | null>,
   epubRenderableCounts: Map<string, number>,
   previousStateAssets: Record<string, SyncAssetState>,
-  pdfBetaEnabled: boolean,
+  syncPdfNotes: boolean,
 ): Promise<BookFingerprint> {
   const previous = previousStateAssets[book.assetId];
   const annotationModifiedAtForHash =
@@ -574,7 +597,10 @@ async function buildBookFingerprint(
   const pdfSourceModifiedAt =
     pdfFileStamp && pdfFileStamp !== "missing" ? new Date(pdfFileStamp.mtimeMs) : null;
   const baseHash = buildBookSyncHash(book.format, annotationModifiedAtForHash, pdfFileStamp);
-  const hash = `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}`;
+  const hash =
+    book.format === "PDF"
+      ? `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}|pdf-link:${PDF_PAGE_LINK_SCHEMA_VERSION}`
+      : `${baseHash}|schema:${OUTPUT_SCHEMA_VERSION}`;
   let shouldHaveOutput: boolean;
   if (book.format === "EPUB") {
     shouldHaveOutput =
@@ -582,7 +608,7 @@ async function buildBookFingerprint(
   } else {
     shouldHaveOutput = Boolean(
       previous?.bookFileRelativePath ||
-        (pdfBetaEnabled && book.path && (!previous || previous.hash !== hash)),
+        (syncPdfNotes && book.path && (!previous || previous.hash !== hash)),
     );
   }
 
@@ -604,6 +630,59 @@ function toPlanBook(snapshot: BookSyncSnapshot, reason: SyncPlanReason): SyncPla
     bookFileRelativePath: snapshot.bookFileRelativePath,
     reason,
   };
+}
+
+function renderBookMarkdownForSnapshot(
+  snapshot: BookSyncSnapshot,
+  epubNotes: EpubAnnotation[],
+  epubChapterTitleByKey: Map<string, string> | undefined,
+  epubChapterOrderByKey: Map<string, number> | undefined,
+  pdfPages: PdfPageRenderItem[],
+  coverImagePropertyValue: string | null,
+  vaultName: string | null,
+): string {
+  return snapshot.book.format === "EPUB"
+    ? renderEpubBookMarkdown(
+        snapshot.book,
+        epubNotes,
+        epubChapterTitleByKey,
+        epubChapterOrderByKey,
+        coverImagePropertyValue,
+      )
+    : renderPdfBookMarkdown(
+        snapshot.book,
+        pdfPages,
+        coverImagePropertyValue,
+        snapshot.pdfSourceModifiedAt,
+        vaultName,
+      );
+}
+
+function renderBookFrontmatterForSnapshot(
+  snapshot: BookSyncSnapshot,
+  epubAnnotationCount: number,
+  pdfAnnotatedPages: number,
+  coverImagePropertyValue: string | null,
+): string {
+  const properties =
+    snapshot.book.format === "EPUB"
+      ? getEpubBookProperties(snapshot.book, epubAnnotationCount, coverImagePropertyValue)
+      : getPdfBookProperties(
+          snapshot.book,
+          pdfAnnotatedPages,
+          coverImagePropertyValue,
+          snapshot.pdfSourceModifiedAt,
+        );
+  return renderBookFrontmatterMarkdown(properties);
+}
+
+function readExistingPdfAnnotatedPages(markdown: string | null): number {
+  if (!markdown) {
+    return 0;
+  }
+
+  const matches = markdown.match(/<a href="[^"]*">第 \d+ 页<\/a>/g);
+  return matches?.length ?? 0;
 }
 
 function toObsidianWikilink(managedDirName: string, relativePath: string | null): string | null {
@@ -655,7 +734,7 @@ export async function buildSyncPlan(
       epubAnnotationMaxModificationDates,
       epubRenderableCounts,
       previousState.assets,
-      config.pdfBetaEnabled,
+      config.syncPdfNotes,
     );
   });
   const fingerprintByAssetId = new Map<string, BookFingerprint>();
@@ -694,12 +773,24 @@ export async function buildSyncPlan(
           : null,
       coverImageRelativePath: bookFileRelativePath ? path.posix.join("assets", "covers", `${book.assetId}.png`) : null,
       pdfSourceModifiedAt: fingerprint?.pdfSourceModifiedAt ?? null,
+      syncPaused: false,
     };
   });
 
+  await Promise.all(
+    bookSnapshots.map(async (snapshot) => {
+      const previous = previousState.assets[snapshot.book.assetId];
+      if (!previous?.bookFileRelativePath) {
+        return;
+      }
+      const existingMarkdown = await readPreviousBookMarkdown(outputDir, previous.bookFileRelativePath);
+      snapshot.syncPaused = readBookSyncPaused(existingMarkdown);
+    }),
+  );
+
   for (const snapshot of bookSnapshots) {
     const existing = nextStateAssets[snapshot.book.assetId];
-    if (!existing) {
+    if (!existing || snapshot.syncPaused) {
       continue;
     }
     nextStateAssets[snapshot.book.assetId] = {
@@ -720,6 +811,10 @@ export async function buildSyncPlan(
   const unchanged: SyncPlanBook[] = [];
   for (const snapshot of bookSnapshots) {
     if (forcePdfResync && snapshot.book.format === "PDF") {
+      if (snapshot.syncPaused) {
+        unchanged.push(toPlanBook(snapshot, "sync-paused"));
+        continue;
+      }
       changedSnapshots.push(snapshot);
       changed.push(toPlanBook(snapshot, "pdf-assets-missing"));
       continue;
@@ -735,18 +830,30 @@ export async function buildSyncPlan(
       previous,
     );
     if (regenerateReason) {
+      if (snapshot.syncPaused) {
+        unchanged.push(toPlanBook(snapshot, "sync-paused"));
+        continue;
+      }
       changedSnapshots.push(snapshot);
       changed.push(toPlanBook(snapshot, regenerateReason));
       continue;
     }
 
     if (snapshot.book.format === "PDF" && (await hasLegacyPdfFallbackMarker(outputDir, previous))) {
+      if (snapshot.syncPaused) {
+        unchanged.push(toPlanBook(snapshot, "sync-paused"));
+        continue;
+      }
       changedSnapshots.push(snapshot);
       changed.push(toPlanBook(snapshot, "legacy-output"));
       continue;
     }
 
     if (snapshot.book.format === "EPUB" && (await hasLegacyEpubInternalChapterHeading(outputDir, previous))) {
+      if (snapshot.syncPaused) {
+        unchanged.push(toPlanBook(snapshot, "sync-paused"));
+        continue;
+      }
       changedSnapshots.push(snapshot);
       changed.push(toPlanBook(snapshot, "legacy-output"));
       continue;
@@ -756,6 +863,26 @@ export async function buildSyncPlan(
       changedSnapshots.push(snapshot);
       changed.push(toPlanBook(snapshot, "missing-output"));
       continue;
+    }
+
+    if (snapshot.syncPaused) {
+      unchanged.push(toPlanBook(snapshot, "sync-paused"));
+      continue;
+    }
+
+    if (previous?.bookFileRelativePath && snapshot.bookFileRelativePath) {
+      const existingMarkdown = await readPreviousBookMarkdown(outputDir, previous.bookFileRelativePath);
+      const generatedFrontmatter = renderBookFrontmatterForSnapshot(
+        snapshot,
+        epubRenderableCounts.get(snapshot.book.assetId) ?? 0,
+        readExistingPdfAnnotatedPages(existingMarkdown),
+        toObsidianWikilink(config.managedDirName, previous.coverImageRelativePath),
+      );
+      if (hasBookMarkdownPropertyDrift(generatedFrontmatter, existingMarkdown)) {
+        changedSnapshots.push(snapshot);
+        changed.push(toPlanBook(snapshot, "properties-changed"));
+        continue;
+      }
     }
 
     unchanged.push(toPlanBook(snapshot, "unchanged"));
@@ -811,6 +938,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
   } = plan;
   const stagingRoot = path.join(outputDir, ".staging", `${Date.now()}-${process.pid}`);
   const syncStartedAt = new Date().toISOString();
+  const vaultName = path.basename(path.resolve(config.vaultDir));
 
   const stats: SyncStats = {
     totalBooks: plan.stats.totalBooks,
@@ -827,11 +955,11 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
   }
 
   const hasChangedPdfSnapshots = changedSnapshots.some((snapshot) => snapshot.book.format === "PDF");
-  const shouldResolvePdfRenderer = config.pdfBetaEnabled && !options.dryRun && hasChangedPdfSnapshots;
+  const shouldResolvePdfRenderer = config.syncPdfNotes && !options.dryRun && hasChangedPdfSnapshots;
   const resolvedPdfRenderBackend: PdfRenderBackend = shouldResolvePdfRenderer
     ? resolvePdfRenderBackend(config.pdfRenderBackend)
     : "auto";
-  if (config.pdfBetaEnabled) {
+  if (config.syncPdfNotes) {
     const activePdfRendererDetail = options.dryRun
       ? "dry-run(no render)"
       : hasChangedPdfSnapshots
@@ -954,7 +1082,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
             nextBookFileRelativePath = snapshot.bookFileRelativePath;
           }
         } else {
-          if (config.pdfBetaEnabled && snapshot.book.path) {
+          if (config.syncPdfNotes && snapshot.book.path) {
             stagedPdfAssetDir = path.join(stagingRoot, "assets", "pdf", snapshot.book.assetId);
             pdfPages = await generatePdfPages(
               snapshot.book,
@@ -998,28 +1126,24 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
 
         if (nextBookFileRelativePath) {
           const coverImagePropertyValue = toObsidianWikilink(config.managedDirName, nextCoverImageRelativePath);
-          markdown =
-            snapshot.book.format === "EPUB"
-              ? renderEpubBookMarkdown(
-                  snapshot.book,
-                  epubNotes,
-                  epubChapterTitleByKey,
-                  epubChapterOrderByKey,
-                  coverImagePropertyValue,
-                )
-              : renderPdfBookMarkdown(
-                  snapshot.book,
-                  pdfPages,
-                  coverImagePropertyValue,
-                  snapshot.pdfSourceModifiedAt,
-                );
+          markdown = renderBookMarkdownForSnapshot(
+            snapshot,
+            epubNotes,
+            epubChapterTitleByKey,
+            epubChapterOrderByKey,
+            pdfPages,
+            coverImagePropertyValue,
+            vaultName,
+          );
         }
 
         if (!options.dryRun) {
           const hasRenderableContent = epubNotes.length > 0 || pdfPages.length > 0;
           if (nextBookFileRelativePath && hasRenderableContent) {
             const targetBookPath = path.join(outputDir, nextBookFileRelativePath);
-            await writeFileAtomically(targetBookPath, markdown);
+            const existingMarkdown = await readPreviousBookMarkdown(outputDir, nextBookFileRelativePath);
+            const mergedMarkdown = mergeBookMarkdownProperties(markdown, existingMarkdown);
+            await writeFileAtomically(targetBookPath, mergedMarkdown);
           }
 
           if (snapshot.book.format === "PDF" && pdfPages.length > 0) {

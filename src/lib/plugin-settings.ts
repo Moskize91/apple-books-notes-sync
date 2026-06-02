@@ -1,25 +1,30 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { parsePdfRenderBackend } from "./config";
-import type { PdfRenderBackend, SyncConfig } from "./types";
+import { parsePdfPageLinkTarget, parsePdfRenderBackend } from "./config";
+import { PLUGIN_ID } from "./obsidian-protocol";
+import type { PdfPageLinkTarget, PdfRenderBackend, SyncConfig } from "./types";
 
-export const PLUGIN_ID = "apple-books-notes-sync";
+export { PLUGIN_ID };
 export const DEFAULT_MANAGED_DIR_NAME = "Apple Books Notes";
 
 export type PluginSettings = {
   managedDirName: string;
-  pdfBetaEnabled: boolean;
+  syncPdfNotes: boolean;
   pdfRenderBackend: PdfRenderBackend;
+  pdfPageLinkTarget: PdfPageLinkTarget;
   absyncPath?: string;
 };
 
-type RawPluginSettings = Partial<PluginSettings>;
+type RawPluginSettings = Partial<PluginSettings> & {
+  pdfBetaEnabled?: boolean;
+};
 
 export function getDefaultPluginSettings(): PluginSettings {
   return {
     managedDirName: DEFAULT_MANAGED_DIR_NAME,
-    pdfBetaEnabled: true,
+    syncPdfNotes: true,
     pdfRenderBackend: "auto",
+    pdfPageLinkTarget: "edge",
   };
 }
 
@@ -37,8 +42,9 @@ export function normalizePluginSettings(raw: RawPluginSettings | null | undefine
 
   return {
     managedDirName,
-    pdfBetaEnabled: raw?.pdfBetaEnabled ?? defaults.pdfBetaEnabled,
+    syncPdfNotes: raw?.syncPdfNotes ?? raw?.pdfBetaEnabled ?? defaults.syncPdfNotes,
     pdfRenderBackend: parsePdfRenderBackend(raw?.pdfRenderBackend, defaults.pdfRenderBackend),
+    pdfPageLinkTarget: parsePdfPageLinkTarget(raw?.pdfPageLinkTarget, defaults.pdfPageLinkTarget),
     ...(absyncPath ? { absyncPath } : {}),
   };
 }
@@ -47,8 +53,9 @@ export function pluginSettingsToSyncConfig(vaultDir: string, settings: PluginSet
   return {
     vaultDir: path.resolve(vaultDir),
     managedDirName: settings.managedDirName,
-    pdfBetaEnabled: settings.pdfBetaEnabled,
+    syncPdfNotes: settings.syncPdfNotes,
     pdfRenderBackend: settings.pdfRenderBackend,
+    pdfPageLinkTarget: settings.pdfPageLinkTarget,
   };
 }
 

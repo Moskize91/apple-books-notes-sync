@@ -6,6 +6,7 @@ import type { EpubAnnotation } from "./types";
 
 const CHAPTER_PATTERN = /\[([^\]]+)\]/;
 const XML_ENTITY_PATTERN = /&(#x?[0-9a-fA-F]+|amp|lt|gt|quot|apos);/g;
+const XML_NAME_PREFIX_PATTERN = String.raw`(?:[A-Za-z_][\w.-]*:)?`;
 const execFileAsync = promisify(execFile);
 
 function decodeXmlEntities(input: string): string {
@@ -54,7 +55,7 @@ function parseXmlAttributes(tag: string): Map<string, string> {
 }
 
 function findRootfilePath(containerXml: string): string | null {
-  const match = containerXml.match(/<rootfile\b[^>]*\bfull-path="([^"]+)"/i);
+  const match = containerXml.match(new RegExp(`<${XML_NAME_PREFIX_PATTERN}rootfile\\b[^>]*\\bfull-path="([^"]+)"`, "i"));
   if (!match?.[1]) {
     return null;
   }
@@ -108,13 +109,13 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
   let coverItemId: string | null = null;
   const spineOrderById = new Map<string, number>();
 
-  const spineTagMatch = opfXml.match(/<spine\b[^>]*>/i);
+  const spineTagMatch = opfXml.match(new RegExp(`<${XML_NAME_PREFIX_PATTERN}spine\\b[^>]*>`, "i"));
   if (spineTagMatch?.[0]) {
     const spineAttrs = parseXmlAttributes(spineTagMatch[0]);
     ncxItemId = spineAttrs.get("toc") ?? null;
   }
 
-  const itemrefPattern = /<itemref\b[^>]*>/gi;
+  const itemrefPattern = new RegExp(`<${XML_NAME_PREFIX_PATTERN}itemref\\b[^>]*>`, "gi");
   let itemrefMatch = itemrefPattern.exec(opfXml);
   let spineIndex = 0;
   while (itemrefMatch) {
@@ -127,7 +128,7 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
     itemrefMatch = itemrefPattern.exec(opfXml);
   }
 
-  const metaPattern = /<meta\b[^>]*>/gi;
+  const metaPattern = new RegExp(`<${XML_NAME_PREFIX_PATTERN}meta\\b[^>]*>`, "gi");
   let metaMatch = metaPattern.exec(opfXml);
   while (metaMatch) {
     const attrs = parseXmlAttributes(metaMatch[0]);
@@ -137,7 +138,7 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
     metaMatch = metaPattern.exec(opfXml);
   }
 
-  const itemPattern = /<item\b[^>]*>/gi;
+  const itemPattern = new RegExp(`<${XML_NAME_PREFIX_PATTERN}item\\b[^>]*>`, "gi");
   let itemMatch = itemPattern.exec(opfXml);
   while (itemMatch) {
     const attrs = parseXmlAttributes(itemMatch[0]);

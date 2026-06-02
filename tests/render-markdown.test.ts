@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { OBSIDIAN_OPEN_PDF_ACTION } from "../src/lib/obsidian-protocol";
 import { renderEpubBookMarkdown, renderIndexMarkdown, renderPdfBookMarkdown } from "../src/lib/render-markdown";
 import type { Book, EpubAnnotation } from "../src/lib/types";
 
@@ -117,6 +118,7 @@ test("renderEpubBookMarkdown groups by chapter", () => {
   assert.match(output, /format: "EPUB"/);
   assert.match(output, /annotation_count: 1/);
   assert.match(output, /last_modified_at: 2026-05-30T04:34:56/);
+  assert.match(output, /open_url: "\[Demo Book\]\(<ibooks:\/\/assetid\/ABCDEF0123456789>\)"/);
   assert.match(output, /## 未分章/);
   assert.doesNotMatch(output, /## chapter-1\.xhtml/);
   assert.match(output, /\[2026-02-01 00:00:00\]\(<ibooks:\/\/assetid\/ABCDEF0123456789#epubcfi\(.*\)>\) Highlighted text/);
@@ -324,7 +326,13 @@ test("renderPdfBookMarkdown renders single text note directly", () => {
   assert.doesNotMatch(output, /last_modified_at: 2026-05-30T04:34:56/);
   assert.match(
     output,
-    /<p align="center"><img src="\.\.\/assets\/pdf\/asset-id\/page-8\.png" alt="第8页" \/> <a href="\/tmp\/demo\.pdf#page=8">第 8 页<\/a><\/p>/,
+    new RegExp(`open_url: "\\[Demo Book\\]\\(<obsidian:\\/\\/${OBSIDIAN_OPEN_PDF_ACTION}\\?pdf=%2Ftmp%2Fdemo\\.pdf>\\)"`),
+  );
+  assert.match(
+    output,
+    new RegExp(
+      `<p align="center"><img src="\\.\\.\\/assets\\/pdf\\/asset-id\\/page-8\\.png" alt="第8页" \\/> <a href="obsidian:\\/\\/${OBSIDIAN_OPEN_PDF_ACTION}\\?pdf=%2Ftmp%2Fdemo\\.pdf&amp;page=8">第 8 页<\\/a><\\/p>`,
+    ),
   );
   assert.match(output, /> 单条原文内容/);
   assert.match(output, /\n ?单条笔记内容\n/);

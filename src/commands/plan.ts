@@ -97,6 +97,12 @@ Change reasons:
   missing-output
     Sync state exists, but the expected Markdown file is missing.
 
+  properties-changed
+    Existing Markdown properties need to be reconciled with managed fields.
+
+  sync-paused
+    The existing Markdown has sync_paused: true, so absync will not rewrite it.
+
   pdf-assets-missing
     PDF image assets are missing while prior sync state exists.
 

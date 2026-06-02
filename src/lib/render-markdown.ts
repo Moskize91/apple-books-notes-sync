@@ -1,6 +1,8 @@
 import path from "node:path";
 import type { Book, EpubAnnotation, SyncAssetState } from "./types";
 import { normalizeQuoteText } from "./quote-normalize";
+import { BOOK_INTERACTIVE_PROPERTY_DEFAULTS, BOOK_PROPERTY_KEYS } from "./book-properties";
+import { OBSIDIAN_OPEN_PDF_ACTION } from "./obsidian-protocol";
 
 type PdfRenderedNote = {
   marker: string | null;
@@ -20,6 +22,7 @@ type FrontmatterDateTime = {
   value: Date;
 };
 type FrontmatterValue = string | number | boolean | FrontmatterDateTime;
+type FrontmatterProperty = [string, FrontmatterValue | null];
 const LOCATION_SORT_COLLATOR = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
 function fmtDate(date: Date): string {
@@ -100,7 +103,7 @@ function toYamlScalar(value: FrontmatterValue): string {
   return String(value);
 }
 
-function pushFrontmatter(lines: string[], properties: Array<[string, FrontmatterValue | null]>): void {
+function pushFrontmatter(lines: string[], properties: FrontmatterProperty[]): void {
   lines.push("---");
   for (const [key, value] of properties) {
     if (value === null) {
@@ -110,6 +113,12 @@ function pushFrontmatter(lines: string[], properties: Array<[string, Frontmatter
   }
   lines.push("---");
   lines.push("");
+}
+
+export function renderBookFrontmatterMarkdown(properties: FrontmatterProperty[]): string {
+  const lines: string[] = [];
+  pushFrontmatter(lines, properties);
+  return lines.join("\n");
 }
 
 function toDisplayChapterKey(rawChapterKey: string, chapterTitleByKey?: Map<string, string>): string {
@@ -212,12 +221,28 @@ function buildEpubLocationLink(book: Book, location: string | null): string {
   return `ibooks://assetid/${book.assetId}#${location}`;
 }
 
-function buildPdfStandardPageLink(book: Book, pageNumber: number): string {
+function buildEpubOpenUrl(book: Book): string {
+  return `ibooks://assetid/${book.assetId}`;
+}
+
+function buildMarkdownLink(label: string, url: string): string {
+  const escapedLabel = label.replace(/\\/g, "\\\\").replace(/]/g, "\\]").replace(/\s+/g, " ").trim();
+  return `[${escapedLabel}](<${url}>)`;
+}
+
+function buildPdfOpenUrl(book: Book, vaultName?: string | null, pageNumber?: number): string {
   if (!book.path) {
     return "#";
   }
-  const absolutePath = path.isAbsolute(book.path) ? book.path : path.resolve(book.path);
-  return `${absolutePath}#page=${pageNumber}`;
+  const params: Array<[string, string]> = [["pdf", path.isAbsolute(book.path) ? book.path : path.resolve(book.path)]];
+  if (pageNumber) {
+    params.push(["page", String(pageNumber)]);
+  }
+  if (vaultName) {
+    params.push(["vault", vaultName]);
+  }
+  const query = params.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
+  return `obsidian://${OBSIDIAN_OPEN_PDF_ACTION}?${query}`;
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -241,16 +266,7 @@ export function renderEpubBookMarkdown(
   coverImagePropertyValue?: string | null,
 ): string {
   const lines: string[] = [];
-  pushFrontmatter(lines, [
-    ["title", book.title],
-    ["author", book.author ?? "-"],
-    ["publisher", book.publisher],
-    ["format", "EPUB"],
-    ["annotation_count", annotations.length],
-    ["last_modified_at", book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null],
-    ["cover", coverImagePropertyValue ?? null],
-    ["source_file", book.path],
-  ]);
+  pushFrontmatter(lines, getEpubBookProperties(book, annotations.length, coverImagePropertyValue));
 
   if (annotations.length === 0) {
     lines.push("> 本书暂无可同步的 EPUB 标注。");
@@ -320,24 +336,37 @@ export function renderEpubBookMarkdown(
   return lines.join("\n");
 }
 
+export function getEpubBookProperties(
+  book: Book,
+  annotationCount: number,
+  coverImagePropertyValue?: string | null,
+): FrontmatterProperty[] {
+  return [
+    [BOOK_PROPERTY_KEYS.title, book.title],
+    [BOOK_PROPERTY_KEYS.author, book.author ?? "-"],
+    [BOOK_PROPERTY_KEYS.publisher, book.publisher],
+    [BOOK_PROPERTY_KEYS.format, "EPUB"],
+    [BOOK_PROPERTY_KEYS.syncPaused, BOOK_INTERACTIVE_PROPERTY_DEFAULTS.sync_paused],
+    [BOOK_PROPERTY_KEYS.annotationCount, annotationCount],
+    [
+      BOOK_PROPERTY_KEYS.lastModifiedAt,
+      book.annotationModifiedAt ? { type: "datetime", value: book.annotationModifiedAt } : null,
+    ],
+    [BOOK_PROPERTY_KEYS.cover, coverImagePropertyValue ?? null],
+    [BOOK_PROPERTY_KEYS.sourceFile, book.path],
+    [BOOK_PROPERTY_KEYS.openUrl, buildMarkdownLink(book.title, buildEpubOpenUrl(book))],
+  ];
+}
+
 export function renderPdfBookMarkdown(
   book: Book,
   pages: PdfRenderedPage[],
   coverImagePropertyValue?: string | null,
   sourceModifiedAt?: Date | null,
+  vaultName?: string | null,
 ): string {
   const lines: string[] = [];
-  pushFrontmatter(lines, [
-    ["title", book.title],
-    ["author", book.author ?? "-"],
-    ["publisher", book.publisher],
-    ["format", "PDF"],
-    ["pdf_beta", true],
-    ["annotated_pages", pages.length],
-    ["last_modified_at", sourceModifiedAt ? { type: "datetime", value: sourceModifiedAt } : null],
-    ["cover", coverImagePropertyValue ?? null],
-    ["source_file", book.path],
-  ]);
+  pushFrontmatter(lines, getPdfBookProperties(book, pages.length, coverImagePropertyValue, sourceModifiedAt));
 
   if (pages.length === 0) {
     lines.push("> 本书暂无可同步的 PDF 标注。");
@@ -355,12 +384,12 @@ export function renderPdfBookMarkdown(
     if (page.imageRelativePath) {
       const pageLinkPath = path.posix.join("..", page.imageRelativePath);
       const escapedImagePath = escapeHtmlAttr(pageLinkPath);
-      const escapedPageLink = escapeHtmlAttr(buildPdfStandardPageLink(book, page.pageNumber));
+      const escapedPageLink = escapeHtmlAttr(buildPdfOpenUrl(book, vaultName, page.pageNumber));
       lines.push(
         `<p align="center"><img src="${escapedImagePath}" alt="第${page.pageNumber}页" /> <a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`,
       );
     } else {
-      const escapedPageLink = escapeHtmlAttr(buildPdfStandardPageLink(book, page.pageNumber));
+      const escapedPageLink = escapeHtmlAttr(buildPdfOpenUrl(book, vaultName, page.pageNumber));
       lines.push(`<p align="center"><a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`);
     }
     lines.push("");
@@ -389,6 +418,26 @@ export function renderPdfBookMarkdown(
   }
 
   return lines.join("\n");
+}
+
+export function getPdfBookProperties(
+  book: Book,
+  annotatedPages: number,
+  coverImagePropertyValue?: string | null,
+  sourceModifiedAt?: Date | null,
+): FrontmatterProperty[] {
+  return [
+    [BOOK_PROPERTY_KEYS.title, book.title],
+    [BOOK_PROPERTY_KEYS.author, book.author ?? "-"],
+    [BOOK_PROPERTY_KEYS.publisher, book.publisher],
+    [BOOK_PROPERTY_KEYS.format, "PDF"],
+    [BOOK_PROPERTY_KEYS.syncPaused, BOOK_INTERACTIVE_PROPERTY_DEFAULTS.sync_paused],
+    [BOOK_PROPERTY_KEYS.annotatedPages, annotatedPages],
+    [BOOK_PROPERTY_KEYS.lastModifiedAt, sourceModifiedAt ? { type: "datetime", value: sourceModifiedAt } : null],
+    [BOOK_PROPERTY_KEYS.cover, coverImagePropertyValue ?? null],
+    [BOOK_PROPERTY_KEYS.sourceFile, book.path],
+    [BOOK_PROPERTY_KEYS.openUrl, buildMarkdownLink(book.title, buildPdfOpenUrl(book))],
+  ];
 }
 
 function pushPdfNoteBlock(lines: string[], note: PdfRenderedNote, markerLabel: string | null): void {
