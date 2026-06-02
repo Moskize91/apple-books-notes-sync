@@ -46,6 +46,8 @@ test("writeSyncState persists assets", async () => {
         hash: "EPUB|mod:10",
         lastSyncedAt: "2026-02-28T00:00:00.000Z",
         bookFileRelativePath: "books/book-1.md",
+        chapterFileRelativePaths: ["books/book-1/001-intro.md"],
+        interactiveProperties: { sync_paused: false, chapter_notes: true },
         pdfAssetDirRelativePath: null,
         coverImageRelativePath: "assets/covers/asset-1.png",
       },
@@ -56,6 +58,11 @@ test("writeSyncState persists assets", async () => {
     assert.equal(await fileExists(getSyncStateSqlitePath(tempDir)), true);
     assert.equal(reloaded.assets["asset-1"]?.hash, "EPUB|mod:10");
     assert.equal(reloaded.assets["asset-1"]?.lastSyncedAt, "2026-02-28T00:00:00.000Z");
+    assert.deepEqual(reloaded.assets["asset-1"]?.interactiveProperties, {
+      sync_paused: false,
+      chapter_notes: true,
+    });
+    assert.deepEqual(reloaded.assets["asset-1"]?.chapterFileRelativePaths, ["books/book-1/001-intro.md"]);
     assert.equal(reloaded.assets["asset-1"]?.coverImageRelativePath, "assets/covers/asset-1.png");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -78,6 +85,7 @@ test("readSyncState migrates legacy JSON state when sqlite state is missing", as
             hash: "EPUB|mod:1",
             lastSyncedAt: null,
             bookFileRelativePath: "books/legacy.md",
+            chapterNotes: true,
             pdfAssetDirRelativePath: null,
             coverImageRelativePath: null,
           },
@@ -88,6 +96,11 @@ test("readSyncState migrates legacy JSON state when sqlite state is missing", as
 
     const state = await readSyncState(tempDir);
     assert.equal(state.assets.legacy?.title, "Legacy");
+    assert.deepEqual(state.assets.legacy?.interactiveProperties, {
+      sync_paused: false,
+      chapter_notes: true,
+    });
+    assert.deepEqual(state.assets.legacy?.chapterFileRelativePaths, []);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

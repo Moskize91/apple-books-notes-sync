@@ -3,63 +3,23 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { EpubAnnotation } from "./types";
+import {
+  findXmlChild,
+  findXmlChildren,
+  findXmlDescendant,
+  findXmlDescendants,
+  getXmlAttr,
+  getXmlText,
+  parseXmlDocument,
+} from "./xml-ns";
 
 const CHAPTER_PATTERN = /\[([^\]]+)\]/;
-const XML_ENTITY_PATTERN = /&(#x?[0-9a-fA-F]+|amp|lt|gt|quot|apos);/g;
-const XML_NAME_PREFIX_PATTERN = String.raw`(?:[A-Za-z_][\w.-]*:)?`;
 const execFileAsync = promisify(execFile);
 
-function decodeXmlEntities(input: string): string {
-  return input.replace(XML_ENTITY_PATTERN, (match, entity: string) => {
-    if (entity === "amp") {
-      return "&";
-    }
-    if (entity === "lt") {
-      return "<";
-    }
-    if (entity === "gt") {
-      return ">";
-    }
-    if (entity === "quot") {
-      return '"';
-    }
-    if (entity === "apos") {
-      return "'";
-    }
-
-    if (entity.startsWith("#x") || entity.startsWith("#X")) {
-      const value = Number.parseInt(entity.slice(2), 16);
-      return Number.isFinite(value) ? String.fromCodePoint(value) : match;
-    }
-    if (entity.startsWith("#")) {
-      const value = Number.parseInt(entity.slice(1), 10);
-      return Number.isFinite(value) ? String.fromCodePoint(value) : match;
-    }
-    return match;
-  });
-}
-
-function parseXmlAttributes(tag: string): Map<string, string> {
-  const attrs = new Map<string, string>();
-  const attrPattern = /([A-Za-z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-  let match = attrPattern.exec(tag);
-  while (match) {
-    const key = match[1];
-    const value = match[2] ?? match[3] ?? "";
-    if (key && value !== undefined) {
-      attrs.set(key, decodeXmlEntities(value));
-    }
-    match = attrPattern.exec(tag);
-  }
-  return attrs;
-}
-
 function findRootfilePath(containerXml: string): string | null {
-  const match = containerXml.match(new RegExp(`<${XML_NAME_PREFIX_PATTERN}rootfile\\b[^>]*\\bfull-path="([^"]+)"`, "i"));
-  if (!match?.[1]) {
-    return null;
-  }
-  return decodeXmlEntities(match[1]);
+  const root = parseXmlDocument(containerXml);
+  const rootfile = root ? findXmlDescendant(root, "rootfile") : null;
+  return rootfile ? getXmlAttr(rootfile, "full-path") : null;
 }
 
 type ParsedOpf = {
@@ -78,25 +38,19 @@ export type EpubPackageMetadata = {
   publisher: string | null;
 };
 
-function stripXmlTags(input: string): string {
-  return input.replace(/<[^>]*>/g, "");
-}
-
-function readXmlElementText(xml: string, elementName: string): string | null {
-  const escapedElementName = elementName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`<${escapedElementName}\\b[^>]*>([\\s\\S]*?)</${escapedElementName}>`, "i");
-  const match = xml.match(pattern);
-  const value = decodeXmlEntities(stripXmlTags(match?.[1] ?? ""))
-    .replace(/\s+/g, " ")
-    .trim();
-  return value || null;
-}
-
 function parseOpfMetadata(opfXml: string): EpubPackageMetadata {
+  const root = parseXmlDocument(opfXml);
+  const metadata = root ? findXmlDescendant(root, "metadata") : null;
+  const readMetadataText = (elementName: string): string | null => {
+    const element = metadata ? findXmlChild(metadata, elementName) : null;
+    const value = element ? getXmlText(element).replace(/\s+/g, " ").trim() : "";
+    return value || null;
+  };
+
   return {
-    title: readXmlElementText(opfXml, "dc:title"),
-    creator: readXmlElementText(opfXml, "dc:creator"),
-    publisher: readXmlElementText(opfXml, "dc:publisher"),
+    title: readMetadataText("title"),
+    creator: readMetadataText("creator"),
+    publisher: readMetadataText("publisher"),
   };
 }
 
@@ -108,50 +62,51 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
   let navItemId: string | null = null;
   let coverItemId: string | null = null;
   const spineOrderById = new Map<string, number>();
+  const root = parseXmlDocument(opfXml);
 
-  const spineTagMatch = opfXml.match(new RegExp(`<${XML_NAME_PREFIX_PATTERN}spine\\b[^>]*>`, "i"));
-  if (spineTagMatch?.[0]) {
-    const spineAttrs = parseXmlAttributes(spineTagMatch[0]);
-    ncxItemId = spineAttrs.get("toc") ?? null;
+  if (!root) {
+    return {
+      manifestHrefById,
+      manifestMediaTypeById,
+      manifestPropertiesById,
+      ncxItemId,
+      navItemId,
+      coverItemId,
+      spineOrderById,
+    };
   }
 
-  const itemrefPattern = new RegExp(`<${XML_NAME_PREFIX_PATTERN}itemref\\b[^>]*>`, "gi");
-  let itemrefMatch = itemrefPattern.exec(opfXml);
-  let spineIndex = 0;
-  while (itemrefMatch) {
-    const attrs = parseXmlAttributes(itemrefMatch[0]);
-    const idref = attrs.get("idref");
-    if (idref && !spineOrderById.has(idref)) {
-      spineOrderById.set(idref, spineIndex);
-      spineIndex += 1;
+  const spine = findXmlDescendant(root, "spine");
+  ncxItemId = spine ? getXmlAttr(spine, "toc") : null;
+
+  if (spine) {
+    let spineIndex = 0;
+    for (const itemref of findXmlChildren(spine, "itemref")) {
+      const idref = getXmlAttr(itemref, "idref");
+      if (idref && !spineOrderById.has(idref)) {
+        spineOrderById.set(idref, spineIndex);
+        spineIndex += 1;
+      }
     }
-    itemrefMatch = itemrefPattern.exec(opfXml);
   }
 
-  const metaPattern = new RegExp(`<${XML_NAME_PREFIX_PATTERN}meta\\b[^>]*>`, "gi");
-  let metaMatch = metaPattern.exec(opfXml);
-  while (metaMatch) {
-    const attrs = parseXmlAttributes(metaMatch[0]);
-    if ((attrs.get("name") ?? "").toLowerCase() === "cover") {
-      coverItemId = attrs.get("content") ?? coverItemId;
+  for (const meta of findXmlDescendants(root, "meta")) {
+    if ((getXmlAttr(meta, "name") ?? "").toLowerCase() === "cover") {
+      coverItemId = getXmlAttr(meta, "content") ?? coverItemId;
     }
-    metaMatch = metaPattern.exec(opfXml);
   }
 
-  const itemPattern = new RegExp(`<${XML_NAME_PREFIX_PATTERN}item\\b[^>]*>`, "gi");
-  let itemMatch = itemPattern.exec(opfXml);
-  while (itemMatch) {
-    const attrs = parseXmlAttributes(itemMatch[0]);
-    const id = attrs.get("id");
-    const href = attrs.get("href");
+  const manifest = findXmlDescendant(root, "manifest");
+  for (const item of manifest ? findXmlChildren(manifest, "item") : []) {
+    const id = getXmlAttr(item, "id");
+    const href = getXmlAttr(item, "href");
     if (id && href) {
       manifestHrefById.set(id, href);
-      const mediaType = attrs.get("media-type");
+      const mediaType = getXmlAttr(item, "media-type");
       if (mediaType) {
         manifestMediaTypeById.set(id, mediaType);
       }
-      const properties = attrs
-        .get("properties")
+      const properties = getXmlAttr(item, "properties")
         ?.split(/\s+/)
         .map((token) => token.trim())
         .filter((token) => token.length > 0);
@@ -164,11 +119,10 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
       if (!coverItemId && properties?.includes("cover-image")) {
         coverItemId = id;
       }
-      if (!ncxItemId && attrs.get("media-type") === "application/x-dtbncx+xml") {
+      if (!ncxItemId && mediaType === "application/x-dtbncx+xml") {
         ncxItemId = id;
       }
     }
-    itemMatch = itemPattern.exec(opfXml);
   }
 
   return {
@@ -184,48 +138,55 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
 
 function parseTocHrefTitleMap(ncxXml: string): Map<string, string> {
   const hrefToTitle = new Map<string, string>();
-  const navPointPattern =
-    /<navPoint\b[\s\S]*?<navLabel>\s*<text>([\s\S]*?)<\/text>\s*<\/navLabel>[\s\S]*?<content\b[^>]*\bsrc="([^"]+)"/gi;
-  let navMatch = navPointPattern.exec(ncxXml);
-  while (navMatch) {
-    const title = decodeXmlEntities(navMatch[1] ?? "").replace(/\s+/g, " ").trim();
-    const src = decodeXmlEntities(navMatch[2] ?? "");
+  const root = parseXmlDocument(ncxXml);
+  const navMap = root ? findXmlDescendant(root, "navMap") : null;
+  for (const navPoint of navMap ? findXmlDescendants(navMap, "navPoint") : []) {
+    const navLabel = findXmlChild(navPoint, "navLabel");
+    const text = navLabel ? findXmlChild(navLabel, "text") : null;
+    const content = findXmlChild(navPoint, "content");
+    const title = text ? getXmlText(text).replace(/\s+/g, " ").trim() : "";
+    const src = content ? (getXmlAttr(content, "src") ?? "") : "";
     const href = src.split("#")[0]?.trim();
     if (title && href && !hrefToTitle.has(href)) {
       hrefToTitle.set(href, title);
     }
-    navMatch = navPointPattern.exec(ncxXml);
   }
   return hrefToTitle;
 }
 
-function stripHtmlTags(input: string): string {
-  return input.replace(/<[^>]*>/g, "");
-}
-
 function parseNavHrefTitleMap(navXml: string): Map<string, string> {
   const hrefToTitle = new Map<string, string>();
-  const tocNavMatch = navXml.match(/<nav\b[^>]*(?:\bepub:type|\btype)\s*=\s*(?:"toc"|'toc')[^>]*>([\s\S]*?)<\/nav>/i);
-  const navBody = tocNavMatch?.[1] ?? navXml;
-  const linkPattern = /<a\b[^>]*\bhref\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/a>/gi;
+  const root = parseXmlDocument(navXml);
+  const navs = root ? findXmlDescendants(root, "nav") : [];
+  const tocNav = navs.find((nav) => getXmlAttr(nav, "type") === "toc") ?? root;
+  if (!tocNav) {
+    return hrefToTitle;
+  }
 
-  let linkMatch = linkPattern.exec(navBody);
-  while (linkMatch) {
-    const hrefRaw = linkMatch[1] ?? linkMatch[2] ?? "";
-    const href = decodeXmlEntities(hrefRaw).split("#")[0]?.trim();
-    const titleRaw = stripHtmlTags(linkMatch[3] ?? "");
-    const title = decodeXmlEntities(titleRaw).replace(/\s+/g, " ").trim();
+  for (const link of findXmlDescendants(tocNav, "a")) {
+    const href = (getXmlAttr(link, "href") ?? "").split("#")[0]?.trim();
+    const title = getXmlText(link).replace(/\s+/g, " ").trim();
     if (title && href && !hrefToTitle.has(href)) {
       hrefToTitle.set(href, title);
     }
-    linkMatch = linkPattern.exec(navBody);
   }
 
   return hrefToTitle;
 }
 
 function isHtmlTocDocument(html: string): boolean {
-  return /<title>\s*Contents\s*<\/title>/i.test(html) || /\bsgc-toc-/i.test(html) || /<nav\b[^>]*(?:\bepub:type|\btype)\s*=\s*(?:"toc"|'toc')/i.test(html);
+  if (/\bsgc-toc-/i.test(html)) {
+    return true;
+  }
+  const root = parseXmlDocument(html);
+  if (!root) {
+    return false;
+  }
+  const title = findXmlDescendant(root, "title");
+  if (title && getXmlText(title).replace(/\s+/g, " ").trim().toLowerCase() === "contents") {
+    return true;
+  }
+  return findXmlDescendants(root, "nav").some((nav) => getXmlAttr(nav, "type") === "toc");
 }
 
 function mergeResolvedHrefTitleMap(

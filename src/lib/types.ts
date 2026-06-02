@@ -71,6 +71,12 @@ export type PdfPageAnnotations = {
   annotations: PdfAnnotation[];
 };
 
+export type PdfOutlineLeaf = {
+  title: string;
+  pageNumber: number;
+  order: number;
+};
+
 export type SyncStats = {
   totalBooks: number;
   successBooks: number;
@@ -79,6 +85,8 @@ export type SyncStats = {
   generatedFiles: number;
 };
 
+export type SyncInteractiveProperties = Record<string, boolean | number | string | null>;
+
 export type SyncAssetState = {
   assetId: string;
   title: string;
@@ -86,6 +94,8 @@ export type SyncAssetState = {
   hash: string;
   lastSyncedAt: string | null;
   bookFileRelativePath: string | null;
+  chapterFileRelativePaths: string[];
+  interactiveProperties: SyncInteractiveProperties;
   pdfAssetDirRelativePath: string | null;
   coverImageRelativePath: string | null;
 };

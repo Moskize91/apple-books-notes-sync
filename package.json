@@ -70,6 +70,7 @@
   },
   "dependencies": {
     "commander": "^14.0.3",
+    "fast-xml-parser": "^5.8.0",
     "pdfjs-dist": "^5.4.624",
     "yaml": "^2.9.0"
   }

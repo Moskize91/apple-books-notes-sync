@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import type { PdfAnnotation, PdfPageAnnotations, PdfRenderBackend, Rect } from "./types";
+import type { PdfAnnotation, PdfOutlineLeaf, PdfPageAnnotations, PdfRenderBackend, Rect } from "./types";
 import { normalizeQuoteText } from "./quote-normalize";
 
 type PdfJsAnnotation = {
@@ -16,6 +16,19 @@ type PdfJsAnnotation = {
 };
 
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
+type PdfJsOutlineItem = {
+  title?: string;
+  dest?: string | unknown[] | null;
+  items?: PdfJsOutlineItem[];
+};
+type PdfJsRef = {
+  num: number;
+  gen: number;
+};
+type PdfDestinationDocument = {
+  getDestination: (destination: string) => Promise<unknown[] | null>;
+  getPageIndex: (ref: PdfJsRef) => Promise<number>;
+};
 type ResolvedPdfRenderBackend = Exclude<PdfRenderBackend, "auto">;
 type PdfRendererAvailability = {
   mutool: boolean;
@@ -330,6 +343,96 @@ export async function extractPdfPageAnnotations(pdfPath: string): Promise<PdfPag
 
   await loadingTask.destroy();
   return pages;
+}
+
+function isPdfJsRef(value: unknown): value is PdfJsRef {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Partial<PdfJsRef>).num === "number" &&
+    typeof (value as Partial<PdfJsRef>).gen === "number"
+  );
+}
+
+async function resolvePdfDestPageNumber(
+  document: PdfDestinationDocument,
+  dest: string | unknown[] | null | undefined,
+): Promise<number | null> {
+  if (!dest) {
+    return null;
+  }
+
+  const resolvedDest = typeof dest === "string" ? await document.getDestination(dest).catch(() => null) : dest;
+  const ref = Array.isArray(resolvedDest) ? resolvedDest[0] : null;
+  if (!isPdfJsRef(ref)) {
+    return null;
+  }
+
+  try {
+    return (await document.getPageIndex(ref)) + 1;
+  } catch {
+    return null;
+  }
+}
+
+async function flattenPdfOutlineLeaves(
+  document: PdfDestinationDocument,
+  items: PdfJsOutlineItem[],
+  result: PdfOutlineLeaf[],
+): Promise<void> {
+  for (const item of items) {
+    const children = item.items ?? [];
+    if (children.length > 0) {
+      await flattenPdfOutlineLeaves(document, children, result);
+      continue;
+    }
+
+    const title = item.title?.replace(/\s+/g, " ").trim();
+    if (!title) {
+      continue;
+    }
+    const pageNumber = await resolvePdfDestPageNumber(document, item.dest);
+    if (!pageNumber) {
+      continue;
+    }
+    result.push({
+      title,
+      pageNumber,
+      order: result.length,
+    });
+  }
+}
+
+export async function readPdfOutlineLeaves(pdfPath: string | null): Promise<PdfOutlineLeaf[]> {
+  if (!pdfPath) {
+    return [];
+  }
+
+  const pdfjs = await getPdfJsModule();
+  const pdfData = await fsPromises.readFile(pdfPath);
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(pdfData),
+    disableWorker: true,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  } as unknown as Parameters<PdfJsModule["getDocument"]>[0]);
+
+  try {
+    const document = await loadingTask.promise;
+    const outline = ((await document.getOutline()) ?? []) as PdfJsOutlineItem[];
+    const leaves: PdfOutlineLeaf[] = [];
+    await flattenPdfOutlineLeaves(document, outline, leaves);
+    return leaves
+      .filter((leaf) => leaf.pageNumber >= 1 && leaf.pageNumber <= document.numPages)
+      .sort((left, right) => {
+        if (left.pageNumber !== right.pageNumber) {
+          return left.pageNumber - right.pageNumber;
+        }
+        return left.order - right.order;
+      });
+  } finally {
+    await loadingTask.destroy();
+  }
 }
 
 function toOverlaySvg(

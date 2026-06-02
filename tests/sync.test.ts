@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getSyncPlanRegenerateReason, hasRenderablePdfPageAnnotations, shouldForcePdfResync } from "../src/lib/sync";
+import {
+  getSyncPlanRegenerateReason,
+  hasLegacyEpubInternalChapterHeadingContent,
+  hasRenderablePdfPageAnnotations,
+  shouldForcePdfResync,
+} from "../src/lib/sync";
 import type { PdfPageAnnotations, SyncAssetState } from "../src/lib/types";
 
 function buildAsset(assetId: string): SyncAssetState {
@@ -11,6 +16,8 @@ function buildAsset(assetId: string): SyncAssetState {
     hash: "PDF|file:1:1|schema:30",
     lastSyncedAt: "2026-02-28T00:00:00.000Z",
     bookFileRelativePath: `books/${assetId}.md`,
+    chapterFileRelativePaths: [],
+    interactiveProperties: { sync_paused: false, chapter_notes: false },
     pdfAssetDirRelativePath: `assets/pdf/${assetId}`,
     coverImageRelativePath: `assets/covers/${assetId}.png`,
   };
@@ -42,45 +49,90 @@ test("getSyncPlanRegenerateReason explains why an asset needs sync", () => {
     hash: "EPUB|mod:1|schema:31",
     lastSyncedAt: "2026-02-28T00:00:00.000Z",
     bookFileRelativePath: "books/book-1.md",
+    chapterFileRelativePaths: [],
+    interactiveProperties: { sync_paused: false, chapter_notes: false },
     pdfAssetDirRelativePath: null,
     coverImageRelativePath: null,
   };
 
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      {
+        format: "EPUB",
+        hash: "EPUB|mod:1|schema:31",
+        bookFileRelativePath: "books/book-1.md",
+        interactiveProperties: { sync_paused: false, chapter_notes: false },
+      },
       undefined,
     ),
     "new",
   );
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "PDF", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      {
+        format: "PDF",
+        hash: "EPUB|mod:1|schema:31",
+        bookFileRelativePath: "books/book-1.md",
+        interactiveProperties: { sync_paused: false, chapter_notes: false },
+      },
       previous,
     ),
     "format-changed",
   );
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "EPUB", hash: "EPUB|mod:2|schema:31", bookFileRelativePath: "books/book-1.md" },
+      {
+        format: "EPUB",
+        hash: "EPUB|mod:2|schema:31",
+        bookFileRelativePath: "books/book-1.md",
+        interactiveProperties: { sync_paused: false, chapter_notes: false },
+      },
       previous,
     ),
     "content-changed",
   );
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-renamed.md" },
+      {
+        format: "EPUB",
+        hash: "EPUB|mod:1|schema:31",
+        bookFileRelativePath: "books/book-renamed.md",
+        interactiveProperties: { sync_paused: false, chapter_notes: false },
+      },
       previous,
     ),
     "output-path-changed",
   );
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      {
+        format: "EPUB",
+        hash: "EPUB|mod:1|schema:31",
+        bookFileRelativePath: "books/book-1.md",
+        interactiveProperties: { sync_paused: false, chapter_notes: true },
+      },
+      previous,
+    ),
+    "properties-changed",
+  );
+  assert.equal(
+    getSyncPlanRegenerateReason(
+      {
+        format: "EPUB",
+        hash: "EPUB|mod:1|schema:31",
+        bookFileRelativePath: "books/book-1.md",
+        interactiveProperties: { sync_paused: true, chapter_notes: false },
+      },
       previous,
     ),
     null,
   );
+});
+
+test("hasLegacyEpubInternalChapterHeadingContent detects internal chapter headings", () => {
+  assert.equal(hasLegacyEpubInternalChapterHeadingContent("# Book\n\n## doc10\n\n> quote"), true);
+  assert.equal(hasLegacyEpubInternalChapterHeadingContent("# Book\n\n## chapter.xhtml\n\n> quote"), true);
+  assert.equal(hasLegacyEpubInternalChapterHeadingContent("# Book\n\n## Introduction 导言\n\n> quote"), false);
 });
 
 test("hasRenderablePdfPageAnnotations detects PDF annotations with note content", () => {
