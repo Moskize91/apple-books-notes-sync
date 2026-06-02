@@ -12,12 +12,14 @@ export const BOOK_PROPERTY_KEYS = {
   sourceFile: "source_file",
   openUrl: "open_url",
   syncPaused: "sync_paused",
+  chapterNotes: "chapter_notes",
 } as const;
 
 export const BOOK_RETIRED_PROPERTY_KEYS = ["pdf_beta"] as const;
 
 export const BOOK_INTERACTIVE_PROPERTY_DEFAULTS = {
   [BOOK_PROPERTY_KEYS.syncPaused]: false,
+  [BOOK_PROPERTY_KEYS.chapterNotes]: false,
 } as const;
 
 export const BOOK_INTERACTIVE_PROPERTY_KEYS = Object.keys(
@@ -36,6 +38,7 @@ export const BOOK_PRESET_PROPERTY_KEYS = [
   BOOK_PROPERTY_KEYS.sourceFile,
   BOOK_PROPERTY_KEYS.openUrl,
   BOOK_PROPERTY_KEYS.syncPaused,
+  BOOK_PROPERTY_KEYS.chapterNotes,
 ] as const;
 
 const BOOK_PRESET_PROPERTY_KEY_SET = new Set<string>(BOOK_PRESET_PROPERTY_KEYS);
@@ -131,6 +134,17 @@ export function readBookSyncPaused(markdown: string | null): boolean {
   return existingProperties?.[BOOK_PROPERTY_KEYS.syncPaused] === true;
 }
 
+export function readBookChapterNotes(markdown: string | null): boolean | null {
+  if (!markdown) {
+    return null;
+  }
+
+  const existingParts = splitFrontmatter(markdown);
+  const existingProperties = existingParts ? parseFrontmatterObject(existingParts.frontmatter) : null;
+  const value = existingProperties?.[BOOK_PROPERTY_KEYS.chapterNotes];
+  return typeof value === "boolean" ? value : null;
+}
+
 function splitFrontmatter(markdown: string): FrontmatterParts | null {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
   if (!match) {
@@ -224,6 +238,7 @@ function isValidInteractiveBookPropertyValue(
 ): boolean {
   switch (key) {
     case BOOK_PROPERTY_KEYS.syncPaused:
+    case BOOK_PROPERTY_KEYS.chapterNotes:
       return typeof value === "boolean";
   }
 }

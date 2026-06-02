@@ -11,6 +11,8 @@ function buildAsset(assetId: string): SyncAssetState {
     hash: "PDF|file:1:1|schema:30",
     lastSyncedAt: "2026-02-28T00:00:00.000Z",
     bookFileRelativePath: `books/${assetId}.md`,
+    chapterNotes: false,
+    chapterFileRelativePaths: [],
     pdfAssetDirRelativePath: `assets/pdf/${assetId}`,
     coverImageRelativePath: `assets/covers/${assetId}.png`,
   };
@@ -42,41 +44,50 @@ test("getSyncPlanRegenerateReason explains why an asset needs sync", () => {
     hash: "EPUB|mod:1|schema:31",
     lastSyncedAt: "2026-02-28T00:00:00.000Z",
     bookFileRelativePath: "books/book-1.md",
+    chapterNotes: false,
+    chapterFileRelativePaths: [],
     pdfAssetDirRelativePath: null,
     coverImageRelativePath: null,
   };
 
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md", chapterNotes: false },
       undefined,
     ),
     "new",
   );
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "PDF", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      { format: "PDF", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md", chapterNotes: false },
       previous,
     ),
     "format-changed",
   );
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "EPUB", hash: "EPUB|mod:2|schema:31", bookFileRelativePath: "books/book-1.md" },
+      { format: "EPUB", hash: "EPUB|mod:2|schema:31", bookFileRelativePath: "books/book-1.md", chapterNotes: false },
       previous,
     ),
     "content-changed",
   );
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-renamed.md" },
+      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-renamed.md", chapterNotes: false },
       previous,
     ),
     "output-path-changed",
   );
   assert.equal(
     getSyncPlanRegenerateReason(
-      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md" },
+      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md", chapterNotes: true },
+      previous,
+    ),
+    "properties-changed",
+  );
+  assert.equal(
+    getSyncPlanRegenerateReason(
+      { format: "EPUB", hash: "EPUB|mod:1|schema:31", bookFileRelativePath: "books/book-1.md", chapterNotes: false },
       previous,
     ),
     null,

@@ -53,6 +53,10 @@ function normalizeStateAsset(assetId: string, value: unknown): SyncAssetState | 
   const coverImageRelativePath =
     typeof candidate.coverImageRelativePath === "string" ? candidate.coverImageRelativePath : null;
   const lastSyncedAt = typeof candidate.lastSyncedAt === "string" ? candidate.lastSyncedAt : null;
+  const chapterNotes = typeof candidate.chapterNotes === "boolean" ? candidate.chapterNotes : false;
+  const chapterFileRelativePaths = Array.isArray(candidate.chapterFileRelativePaths)
+    ? candidate.chapterFileRelativePaths.filter((item): item is string => typeof item === "string")
+    : [];
 
   return {
     assetId,
@@ -61,6 +65,8 @@ function normalizeStateAsset(assetId: string, value: unknown): SyncAssetState | 
     hash: candidate.hash,
     lastSyncedAt,
     bookFileRelativePath: candidate.bookFileRelativePath ?? null,
+    chapterNotes,
+    chapterFileRelativePaths,
     pdfAssetDirRelativePath,
     coverImageRelativePath,
   };

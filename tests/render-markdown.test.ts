@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { OBSIDIAN_OPEN_PDF_ACTION } from "../src/lib/obsidian-protocol";
-import { renderEpubBookMarkdown, renderIndexMarkdown, renderPdfBookMarkdown } from "../src/lib/render-markdown";
+import {
+  buildEpubRenderedChapters,
+  buildPdfRenderedChapters,
+  renderEpubBookMarkdown,
+  renderEpubChapterIndexMarkdown,
+  renderEpubChapterMarkdown,
+  renderIndexMarkdown,
+  renderPdfBookMarkdown,
+  renderPdfChapterIndexMarkdown,
+  renderPdfChapterMarkdown,
+} from "../src/lib/render-markdown";
 import type { Book, EpubAnnotation } from "../src/lib/types";
 
 const demoBook: Book = {
@@ -29,6 +39,8 @@ test("renderIndexMarkdown includes key fields", () => {
         hash: "EPUB|mod:1|schema:30",
         lastSyncedAt: "2026-02-01T00:00:00.000Z",
         bookFileRelativePath: "books/demo-short-name.md",
+        chapterNotes: false,
+        chapterFileRelativePaths: [],
         pdfAssetDirRelativePath: null,
         coverImageRelativePath: null,
       },
@@ -73,6 +85,8 @@ test("renderIndexMarkdown sorts by lastSyncedAt desc without showing timestamp c
         hash: "EPUB|mod:1|schema:30",
         lastSyncedAt: "2026-01-01T00:00:00.000Z",
         bookFileRelativePath: "books/older.md",
+        chapterNotes: false,
+        chapterFileRelativePaths: [],
         pdfAssetDirRelativePath: null,
         coverImageRelativePath: null,
       },
@@ -83,6 +97,8 @@ test("renderIndexMarkdown sorts by lastSyncedAt desc without showing timestamp c
         hash: "EPUB|mod:2|schema:30",
         lastSyncedAt: "2026-02-01T00:00:00.000Z",
         bookFileRelativePath: "books/newer.md",
+        chapterNotes: false,
+        chapterFileRelativePaths: [],
         pdfAssetDirRelativePath: null,
         coverImageRelativePath: null,
       },
@@ -291,6 +307,56 @@ test("renderEpubBookMarkdown keeps single separator between entries", () => {
   assert.match(output, /Second/);
 });
 
+test("renderEpubChapterIndexMarkdown links generated chapter notes", () => {
+  const annotations: EpubAnnotation[] = [
+    {
+      id: "a1",
+      assetId: demoBook.assetId,
+      chapterKey: "id_1",
+      selectedText: "First chapter quote",
+      noteText: null,
+      location: "epubcfi(/6/8[id_1]!/4/2/1,:1,:5)",
+      createdAt: new Date("2026-02-01T00:00:00Z"),
+      kind: "highlight",
+    },
+    {
+      id: "a2",
+      assetId: demoBook.assetId,
+      chapterKey: "id_2",
+      selectedText: "Second chapter quote",
+      noteText: "Second note",
+      location: "epubcfi(/6/10[id_2]!/4/2/1,:1,:5)",
+      createdAt: new Date("2026-02-01T00:00:01Z"),
+      kind: "highlight",
+    },
+  ];
+  const chapters = buildEpubRenderedChapters(
+    annotations,
+    new Map([
+      ["id_1", "第一章"],
+      ["id_2", "第二章"],
+    ]),
+    new Map([
+      ["id_1", 1],
+      ["id_2", 2],
+    ]),
+  );
+
+  const indexOutput = renderEpubChapterIndexMarkdown(demoBook, chapters, [
+    "books/Demo Book/001-第一章.md",
+    "books/Demo Book/002-第二章.md",
+  ]);
+  const chapterOutput = renderEpubChapterMarkdown(demoBook, chapters[1]!, 2);
+
+  assert.match(indexOutput, /chapter_notes: true/);
+  assert.match(indexOutput, /\[\[books\/Demo Book\/001-第一章\|第一章\]\]/);
+  assert.match(indexOutput, /\| \[\[books\/Demo Book\/002-第二章\|第二章\]\] \| 1 \|/);
+  assert.match(chapterOutput, /book_title: "Demo Book"/);
+  assert.match(chapterOutput, /chapter: "第二章"/);
+  assert.match(chapterOutput, /Second chapter quote/);
+  assert.match(chapterOutput, /\nSecond note\n/);
+});
+
 test("renderPdfBookMarkdown renders single text note directly", () => {
   const pdfBook: Book = {
     ...demoBook,
@@ -379,6 +445,47 @@ test("renderPdfBookMarkdown renders multiple notes with markers and separators",
   assert.match(output, /> \*\*标注 ②\*\* 第二条原文/);
   assert.match(output, /第二条笔记/);
   assert.match(output, /\n---\n\n> \*\*标注 ②\*\*/);
+});
+
+test("renderPdf chapter helpers group pages by outline leaves", () => {
+  const pdfBook: Book = {
+    ...demoBook,
+    format: "PDF",
+    path: "/tmp/demo.pdf",
+    annotationCount: null,
+    annotationModifiedAt: null,
+  };
+  const pages = [
+    {
+      pageNumber: 3,
+      imageRelativePath: "assets/pdf/asset-id/page-3.png",
+      notes: [{ marker: null, quoteText: "Chapter one page", noteText: "", hasRect: true }],
+    },
+    {
+      pageNumber: 8,
+      imageRelativePath: "assets/pdf/asset-id/page-8.png",
+      notes: [{ marker: null, quoteText: "Chapter two page", noteText: "PDF note", hasRect: true }],
+    },
+  ];
+  const chapters = buildPdfRenderedChapters(pages, [
+    { title: "PDF 第一章", pageNumber: 1, order: 0 },
+    { title: "PDF 第二章", pageNumber: 8, order: 1 },
+  ]);
+
+  const indexOutput = renderPdfChapterIndexMarkdown(pdfBook, chapters, [
+    "books/Demo Book/001-PDF 第一章.md",
+    "books/Demo Book/002-PDF 第二章.md",
+  ]);
+  const chapterOutput = renderPdfChapterMarkdown(pdfBook, chapters[1]!, 2, new Date("2026-05-31T01:02:03Z"));
+
+  assert.equal(chapters.length, 2);
+  assert.match(indexOutput, /chapter_notes: true/);
+  assert.match(indexOutput, /\[\[books\/Demo Book\/002-PDF 第二章\|PDF 第二章\]\]/);
+  assert.match(chapterOutput, /chapter: "PDF 第二章"/);
+  assert.match(chapterOutput, /last_modified_at: 2026-05-31T01:02:03/);
+  assert.match(chapterOutput, /Chapter two page/);
+  assert.match(chapterOutput, /PDF note/);
+  assert.match(chapterOutput, /src="..\/..\/assets\/pdf\/asset-id\/page-8.png"/);
 });
 
 test("renderEpubBookMarkdown uses chapter spine order instead of title sort", () => {

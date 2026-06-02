@@ -71,6 +71,12 @@ export type PdfPageAnnotations = {
   annotations: PdfAnnotation[];
 };
 
+export type PdfOutlineLeaf = {
+  title: string;
+  pageNumber: number;
+  order: number;
+};
+
 export type SyncStats = {
   totalBooks: number;
   successBooks: number;
@@ -86,6 +92,8 @@ export type SyncAssetState = {
   hash: string;
   lastSyncedAt: string | null;
   bookFileRelativePath: string | null;
+  chapterNotes: boolean;
+  chapterFileRelativePaths: string[];
   pdfAssetDirRelativePath: string | null;
   coverImageRelativePath: string | null;
 };

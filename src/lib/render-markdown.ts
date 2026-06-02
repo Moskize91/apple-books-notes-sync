@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { Book, EpubAnnotation, SyncAssetState } from "./types";
+import type { Book, EpubAnnotation, PdfOutlineLeaf, SyncAssetState } from "./types";
 import { normalizeQuoteText } from "./quote-normalize";
 import { BOOK_INTERACTIVE_PROPERTY_DEFAULTS, BOOK_PROPERTY_KEYS } from "./book-properties";
 import { OBSIDIAN_OPEN_PDF_ACTION } from "./obsidian-protocol";
@@ -15,6 +15,24 @@ type PdfRenderedPage = {
   pageNumber: number;
   imageRelativePath: string | null;
   notes: PdfRenderedNote[];
+};
+
+export type PdfRenderedChapter = {
+  title: string;
+  pageNumber: number;
+  order: number;
+  pages: PdfRenderedPage[];
+};
+
+export type EpubRenderedChapter = {
+  title: string;
+  order: number;
+  annotations: EpubAnnotation[];
+};
+
+export type RenderedMarkdownFile = {
+  relativePath: string;
+  markdown: string;
 };
 
 type FrontmatterDateTime = {
@@ -230,6 +248,12 @@ function buildMarkdownLink(label: string, url: string): string {
   return `[${escapedLabel}](<${url}>)`;
 }
 
+function buildWikiLink(targetRelativePath: string, label: string): string {
+  const target = targetRelativePath.replace(/\.md$/i, "");
+  const escapedLabel = label.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+  return `[[${target}|${escapedLabel || target}]]`;
+}
+
 function buildPdfOpenUrl(book: Book, vaultName?: string | null, pageNumber?: number): string {
   if (!book.path) {
     return "#";
@@ -264,9 +288,10 @@ export function renderEpubBookMarkdown(
   chapterTitleByKey?: Map<string, string>,
   chapterOrderByKey?: Map<string, number>,
   coverImagePropertyValue?: string | null,
+  chapterNotes = false,
 ): string {
   const lines: string[] = [];
-  pushFrontmatter(lines, getEpubBookProperties(book, annotations.length, coverImagePropertyValue));
+  pushFrontmatter(lines, getEpubBookProperties(book, annotations.length, coverImagePropertyValue, chapterNotes));
 
   if (annotations.length === 0) {
     lines.push("> 本书暂无可同步的 EPUB 标注。");
@@ -274,6 +299,20 @@ export function renderEpubBookMarkdown(
     return lines.join("\n");
   }
 
+  for (const chapter of buildEpubRenderedChapters(annotations, chapterTitleByKey, chapterOrderByKey)) {
+    lines.push(`## ${chapter.title}`);
+    lines.push("");
+    pushEpubAnnotationBlocks(lines, book, chapter.annotations);
+  }
+
+  return lines.join("\n");
+}
+
+export function buildEpubRenderedChapters(
+  annotations: EpubAnnotation[],
+  chapterTitleByKey?: Map<string, string>,
+  chapterOrderByKey?: Map<string, number>,
+): EpubRenderedChapter[] {
   const sortedAnnotations = [...annotations].sort((left, right) => {
     return compareEpubAnnotationsBySourceOrder(left, right, chapterOrderByKey);
   });
@@ -293,53 +332,108 @@ export function renderEpubBookMarkdown(
     chapterMap.set(chapterDisplayKey, { order: chapterOrder, annotations: [annotation] });
   }
 
-  const chapterKeys = Array.from(chapterMap.keys()).sort((left, right) => {
-    const leftEntry = chapterMap.get(left);
-    const rightEntry = chapterMap.get(right);
-    const leftOrder = leftEntry?.order ?? Number.MAX_SAFE_INTEGER;
-    const rightOrder = rightEntry?.order ?? Number.MAX_SAFE_INTEGER;
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder;
-    }
-    return left.localeCompare(right);
-  });
-  for (const chapterKey of chapterKeys) {
-    lines.push(`## ${chapterKey}`);
+  return Array.from(chapterMap.entries())
+    .map(([title, value]) => {
+      return {
+        title,
+        order: value.order,
+        annotations: value.annotations,
+      };
+    })
+    .sort((left, right) => {
+      if (left.order !== right.order) {
+        return left.order - right.order;
+      }
+      return left.title.localeCompare(right.title);
+    });
+}
+
+export function renderEpubChapterIndexMarkdown(
+  book: Book,
+  chapters: EpubRenderedChapter[],
+  chapterFileRelativePaths: string[],
+  coverImagePropertyValue?: string | null,
+): string {
+  const lines: string[] = [];
+  const annotationCount = chapters.reduce((total, chapter) => total + chapter.annotations.length, 0);
+  pushFrontmatter(lines, getEpubBookProperties(book, annotationCount, coverImagePropertyValue, true));
+
+  if (chapters.length === 0) {
+    lines.push("> 本书暂无可同步的 EPUB 标注。");
     lines.push("");
-    const chapterAnnotations = chapterMap.get(chapterKey)?.annotations ?? [];
-    for (const [index, annotation] of chapterAnnotations.entries()) {
-      if (index === 0) {
-        lines.push("---");
-      }
-      const quoteText = normalizeQuoteText(annotation.selectedText ?? "");
-      const timestamp = fmtDate(annotation.createdAt);
-      const timestampLabel = `[${timestamp}](<${buildEpubLocationLink(book, annotation.location)}>)`;
-
-      if (quoteText) {
-        lines.push(`> ${timestampLabel} ${quoteText}`);
-      } else {
-        lines.push(`> ${timestampLabel}`);
-      }
-      lines.push("");
-
-      const normalizedNoteText = normalizeNoteText(annotation.noteText ?? "");
-      if (normalizedNoteText) {
-        lines.push(normalizedNoteText);
-        lines.push("");
-      }
-
-      lines.push("---");
-      lines.push("");
-    }
+    return lines.join("\n");
   }
 
+  lines.push("| 章节 | 标注 |");
+  lines.push("| --- | ---: |");
+  for (const [index, chapter] of chapters.entries()) {
+    const relativePath = chapterFileRelativePaths[index];
+    if (!relativePath) {
+      continue;
+    }
+    lines.push(`| ${buildWikiLink(relativePath, chapter.title)} | ${chapter.annotations.length} |`);
+  }
+  lines.push("");
   return lines.join("\n");
+}
+
+export function renderEpubChapterMarkdown(
+  book: Book,
+  chapter: EpubRenderedChapter,
+  chapterIndex: number,
+): string {
+  const lines: string[] = [];
+  const firstAnnotation = chapter.annotations[0];
+  pushFrontmatter(lines, [
+    [BOOK_PROPERTY_KEYS.title, `${book.title} - ${chapter.title}`],
+    ["book_title", book.title],
+    [BOOK_PROPERTY_KEYS.author, book.author ?? "-"],
+    [BOOK_PROPERTY_KEYS.format, "EPUB"],
+    ["chapter", chapter.title],
+    ["chapter_index", chapterIndex],
+    [BOOK_PROPERTY_KEYS.annotationCount, chapter.annotations.length],
+    [BOOK_PROPERTY_KEYS.sourceFile, book.path],
+    [
+      BOOK_PROPERTY_KEYS.openUrl,
+      buildMarkdownLink(chapter.title, buildEpubLocationLink(book, firstAnnotation?.location ?? null)),
+    ],
+  ]);
+  pushEpubAnnotationBlocks(lines, book, chapter.annotations);
+  return lines.join("\n");
+}
+
+function pushEpubAnnotationBlocks(lines: string[], book: Book, annotations: EpubAnnotation[]): void {
+  for (const [index, annotation] of annotations.entries()) {
+    if (index === 0) {
+      lines.push("---");
+    }
+    const quoteText = normalizeQuoteText(annotation.selectedText ?? "");
+    const timestamp = fmtDate(annotation.createdAt);
+    const timestampLabel = `[${timestamp}](<${buildEpubLocationLink(book, annotation.location)}>)`;
+
+    if (quoteText) {
+      lines.push(`> ${timestampLabel} ${quoteText}`);
+    } else {
+      lines.push(`> ${timestampLabel}`);
+    }
+    lines.push("");
+
+    const normalizedNoteText = normalizeNoteText(annotation.noteText ?? "");
+    if (normalizedNoteText) {
+      lines.push(normalizedNoteText);
+      lines.push("");
+    }
+
+    lines.push("---");
+    lines.push("");
+  }
 }
 
 export function getEpubBookProperties(
   book: Book,
   annotationCount: number,
   coverImagePropertyValue?: string | null,
+  chapterNotes = false,
 ): FrontmatterProperty[] {
   return [
     [BOOK_PROPERTY_KEYS.title, book.title],
@@ -347,6 +441,7 @@ export function getEpubBookProperties(
     [BOOK_PROPERTY_KEYS.publisher, book.publisher],
     [BOOK_PROPERTY_KEYS.format, "EPUB"],
     [BOOK_PROPERTY_KEYS.syncPaused, BOOK_INTERACTIVE_PROPERTY_DEFAULTS.sync_paused],
+    [BOOK_PROPERTY_KEYS.chapterNotes, chapterNotes],
     [BOOK_PROPERTY_KEYS.annotationCount, annotationCount],
     [
       BOOK_PROPERTY_KEYS.lastModifiedAt,
@@ -364,9 +459,10 @@ export function renderPdfBookMarkdown(
   coverImagePropertyValue?: string | null,
   sourceModifiedAt?: Date | null,
   vaultName?: string | null,
+  chapterNotes = false,
 ): string {
   const lines: string[] = [];
-  pushFrontmatter(lines, getPdfBookProperties(book, pages.length, coverImagePropertyValue, sourceModifiedAt));
+  pushFrontmatter(lines, getPdfBookProperties(book, pages.length, coverImagePropertyValue, sourceModifiedAt, chapterNotes));
 
   if (pages.length === 0) {
     lines.push("> 本书暂无可同步的 PDF 标注。");
@@ -375,48 +471,95 @@ export function renderPdfBookMarkdown(
   }
 
   for (const page of pages) {
-    if (lines[lines.length - 1] !== "") {
-      lines.push("");
-    }
-    lines.push("---");
-    lines.push("");
-
-    if (page.imageRelativePath) {
-      const pageLinkPath = path.posix.join("..", page.imageRelativePath);
-      const escapedImagePath = escapeHtmlAttr(pageLinkPath);
-      const escapedPageLink = escapeHtmlAttr(buildPdfOpenUrl(book, vaultName, page.pageNumber));
-      lines.push(
-        `<p align="center"><img src="${escapedImagePath}" alt="第${page.pageNumber}页" /> <a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`,
-      );
-    } else {
-      const escapedPageLink = escapeHtmlAttr(buildPdfOpenUrl(book, vaultName, page.pageNumber));
-      lines.push(`<p align="center"><a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`);
-    }
-    lines.push("");
-
-    if (page.notes.length === 0) {
-      lines.push("- 无可展示笔记");
-    } else if (page.notes.length === 1) {
-      const note = page.notes[0];
-      if (note) {
-        pushPdfNoteBlock(lines, note, null);
-      }
-    } else {
-      for (const [index, note] of page.notes.entries()) {
-        const markerLabel = note.marker ?? String(index + 1);
-        pushPdfNoteBlock(lines, note, markerLabel);
-        if (index < page.notes.length - 1) {
-          lines.push("---");
-          lines.push("");
-        }
-      }
-    }
-
-    if (lines[lines.length - 1] !== "") {
-      lines.push("");
-    }
+    pushPdfPageBlock(lines, book, page, vaultName, "..");
   }
 
+  return lines.join("\n");
+}
+
+export function buildPdfRenderedChapters(
+  pages: PdfRenderedPage[],
+  outlineLeaves: PdfOutlineLeaf[],
+): PdfRenderedChapter[] {
+  const sortedLeaves = [...outlineLeaves].sort((left, right) => {
+    if (left.pageNumber !== right.pageNumber) {
+      return left.pageNumber - right.pageNumber;
+    }
+    return left.order - right.order;
+  });
+  const chapters: PdfRenderedChapter[] = [];
+  for (const [index, leaf] of sortedLeaves.entries()) {
+    const nextLeaf = sortedLeaves[index + 1];
+    const chapterPages = pages.filter((page) => {
+      return page.pageNumber >= leaf.pageNumber && (!nextLeaf || page.pageNumber < nextLeaf.pageNumber);
+    });
+    if (chapterPages.length === 0) {
+      continue;
+    }
+    chapters.push({
+      title: leaf.title,
+      pageNumber: leaf.pageNumber,
+      order: leaf.order,
+      pages: chapterPages,
+    });
+  }
+  return chapters;
+}
+
+export function renderPdfChapterIndexMarkdown(
+  book: Book,
+  chapters: PdfRenderedChapter[],
+  chapterFileRelativePaths: string[],
+  coverImagePropertyValue?: string | null,
+  sourceModifiedAt?: Date | null,
+): string {
+  const lines: string[] = [];
+  const annotatedPages = chapters.reduce((total, chapter) => total + chapter.pages.length, 0);
+  pushFrontmatter(lines, getPdfBookProperties(book, annotatedPages, coverImagePropertyValue, sourceModifiedAt, true));
+
+  if (chapters.length === 0) {
+    lines.push("> 本书暂无可同步的 PDF 标注。");
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  lines.push("| 章节 | 页数 | 标注 |");
+  lines.push("| --- | ---: | ---: |");
+  for (const [index, chapter] of chapters.entries()) {
+    const relativePath = chapterFileRelativePaths[index];
+    if (!relativePath) {
+      continue;
+    }
+    const noteCount = chapter.pages.reduce((total, page) => total + page.notes.length, 0);
+    lines.push(`| ${buildWikiLink(relativePath, chapter.title)} | ${chapter.pages.length} | ${noteCount} |`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+export function renderPdfChapterMarkdown(
+  book: Book,
+  chapter: PdfRenderedChapter,
+  chapterIndex: number,
+  sourceModifiedAt?: Date | null,
+  vaultName?: string | null,
+): string {
+  const lines: string[] = [];
+  pushFrontmatter(lines, [
+    [BOOK_PROPERTY_KEYS.title, `${book.title} - ${chapter.title}`],
+    ["book_title", book.title],
+    [BOOK_PROPERTY_KEYS.author, book.author ?? "-"],
+    [BOOK_PROPERTY_KEYS.format, "PDF"],
+    ["chapter", chapter.title],
+    ["chapter_index", chapterIndex],
+    [BOOK_PROPERTY_KEYS.annotatedPages, chapter.pages.length],
+    [BOOK_PROPERTY_KEYS.lastModifiedAt, sourceModifiedAt ? { type: "datetime", value: sourceModifiedAt } : null],
+    [BOOK_PROPERTY_KEYS.sourceFile, book.path],
+    [BOOK_PROPERTY_KEYS.openUrl, buildMarkdownLink(chapter.title, buildPdfOpenUrl(book, vaultName, chapter.pageNumber))],
+  ]);
+  for (const page of chapter.pages) {
+    pushPdfPageBlock(lines, book, page, vaultName, "../..");
+  }
   return lines.join("\n");
 }
 
@@ -425,6 +568,7 @@ export function getPdfBookProperties(
   annotatedPages: number,
   coverImagePropertyValue?: string | null,
   sourceModifiedAt?: Date | null,
+  chapterNotes = false,
 ): FrontmatterProperty[] {
   return [
     [BOOK_PROPERTY_KEYS.title, book.title],
@@ -432,6 +576,7 @@ export function getPdfBookProperties(
     [BOOK_PROPERTY_KEYS.publisher, book.publisher],
     [BOOK_PROPERTY_KEYS.format, "PDF"],
     [BOOK_PROPERTY_KEYS.syncPaused, BOOK_INTERACTIVE_PROPERTY_DEFAULTS.sync_paused],
+    [BOOK_PROPERTY_KEYS.chapterNotes, chapterNotes],
     [BOOK_PROPERTY_KEYS.annotatedPages, annotatedPages],
     [BOOK_PROPERTY_KEYS.lastModifiedAt, sourceModifiedAt ? { type: "datetime", value: sourceModifiedAt } : null],
     [BOOK_PROPERTY_KEYS.cover, coverImagePropertyValue ?? null],
@@ -458,6 +603,55 @@ function pushPdfNoteBlock(lines: string[], note: PdfRenderedNote, markerLabel: s
 
   if (normalizedNoteText) {
     lines.push(normalizedNoteText.replace(/\n+$/g, ""));
+    lines.push("");
+  }
+}
+
+function pushPdfPageBlock(
+  lines: string[],
+  book: Book,
+  page: PdfRenderedPage,
+  vaultName: string | null | undefined,
+  imageRelativePrefix: ".." | "../..",
+): void {
+  if (lines[lines.length - 1] !== "") {
+    lines.push("");
+  }
+  lines.push("---");
+  lines.push("");
+
+  if (page.imageRelativePath) {
+    const pageLinkPath = path.posix.join(imageRelativePrefix, page.imageRelativePath);
+    const escapedImagePath = escapeHtmlAttr(pageLinkPath);
+    const escapedPageLink = escapeHtmlAttr(buildPdfOpenUrl(book, vaultName, page.pageNumber));
+    lines.push(
+      `<p align="center"><img src="${escapedImagePath}" alt="第${page.pageNumber}页" /> <a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`,
+    );
+  } else {
+    const escapedPageLink = escapeHtmlAttr(buildPdfOpenUrl(book, vaultName, page.pageNumber));
+    lines.push(`<p align="center"><a href="${escapedPageLink}">第 ${page.pageNumber} 页</a></p>`);
+  }
+  lines.push("");
+
+  if (page.notes.length === 0) {
+    lines.push("- 无可展示笔记");
+  } else if (page.notes.length === 1) {
+    const note = page.notes[0];
+    if (note) {
+      pushPdfNoteBlock(lines, note, null);
+    }
+  } else {
+    for (const [index, note] of page.notes.entries()) {
+      const markerLabel = note.marker ?? String(index + 1);
+      pushPdfNoteBlock(lines, note, markerLabel);
+      if (index < page.notes.length - 1) {
+        lines.push("---");
+        lines.push("");
+      }
+    }
+  }
+
+  if (lines[lines.length - 1] !== "") {
     lines.push("");
   }
 }
