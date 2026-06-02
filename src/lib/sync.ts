@@ -41,7 +41,18 @@ import {
   type RenderedMarkdownFile,
 } from "./render-markdown";
 import { acquireSyncLock, buildBookSyncHash, readSyncState, writeSyncState } from "./sync-state";
-import { hasBookMarkdownPropertyDrift, mergeBookMarkdownProperties, readBookChapterNotes, readBookSyncPaused } from "./book-properties";
+import {
+  BOOK_DIRTY_INTERACTIVE_PROPERTY_KEYS,
+  BOOK_PROPERTY_KEYS,
+  getDefaultBookInteractiveProperties,
+  hasBookMarkdownPropertyDrift,
+  mergeBookMarkdownProperties,
+  normalizeBookInteractiveProperties,
+  readBookChapterNotes,
+  readBookInteractiveProperties,
+  readBookSyncPaused,
+  type BookInteractivePropertyValues,
+} from "./book-properties";
 import { sanitizeFileName } from "./path-utils";
 import type {
   Book,
@@ -51,6 +62,7 @@ import type {
   PdfOutlineLeaf,
   SyncConfig,
   SyncAssetState,
+  SyncInteractiveProperties,
   SyncStats,
   SyncableBookFormat,
   PdfPageAnnotations,
@@ -113,6 +125,7 @@ type BookSyncSnapshot = {
   hash: string;
   bookFileRelativePath: string | null;
   chapterNotes: boolean;
+  interactiveProperties: BookInteractivePropertyValues;
   pdfAssetDirRelativePath: string | null;
   coverImageRelativePath: string | null;
   pdfSourceModifiedAt: Date | null;
@@ -151,7 +164,7 @@ export type SyncPlanComparableAsset = {
   format: SyncableBookFormat;
   hash: string;
   bookFileRelativePath: string | null;
-  chapterNotes: boolean;
+  interactiveProperties: BookInteractivePropertyValues;
 };
 
 export type SyncPlanBook = {
@@ -257,6 +270,33 @@ function shouldDefaultChapterNotes(annotationCount: number, hasChapterStructure:
   return hasChapterStructure && annotationCount > CHAPTER_NOTES_ANNOTATION_THRESHOLD;
 }
 
+function getStateInteractiveProperties(asset: SyncAssetState | undefined): BookInteractivePropertyValues {
+  return asset ? normalizeBookInteractiveProperties(asset.interactiveProperties) : getDefaultBookInteractiveProperties();
+}
+
+function toSyncInteractiveProperties(properties: BookInteractivePropertyValues): SyncInteractiveProperties {
+  return { ...properties };
+}
+
+function buildSyncedInteractiveProperties(chapterNotes: boolean): BookInteractivePropertyValues {
+  return {
+    ...getDefaultBookInteractiveProperties(),
+    [BOOK_PROPERTY_KEYS.chapterNotes]: chapterNotes,
+  };
+}
+
+function hasDirtyInteractivePropertyChange(
+  current: BookInteractivePropertyValues,
+  previous: SyncAssetState | undefined,
+): boolean {
+  if (!previous) {
+    return false;
+  }
+
+  const previousProperties = getStateInteractiveProperties(previous);
+  return BOOK_DIRTY_INTERACTIVE_PROPERTY_KEYS.some((key) => current[key] !== previousProperties[key]);
+}
+
 function buildChapterFileRelativePaths(bookFileRelativePath: string, chapterTitles: string[]): string[] {
   const bookDir = path.posix.dirname(bookFileRelativePath);
   const bookStem = path.posix.basename(bookFileRelativePath, ".md");
@@ -330,7 +370,7 @@ export function hasRenderablePdfPageAnnotations(pages: PdfPageAnnotations[]): bo
 function toSyncStateAsset(
   snapshot: BookSyncSnapshot,
   bookFileRelativePath: string | null,
-  chapterNotes: boolean,
+  interactiveProperties: BookInteractivePropertyValues,
   chapterFileRelativePaths: string[],
   pdfAssetDirRelativePath: string | null,
   coverImageRelativePath: string | null,
@@ -346,8 +386,8 @@ function toSyncStateAsset(
     hash: snapshot.hash,
     lastSyncedAt,
     bookFileRelativePath,
-    chapterNotes,
     chapterFileRelativePaths,
+    interactiveProperties: toSyncInteractiveProperties(interactiveProperties),
     pdfAssetDirRelativePath,
     coverImageRelativePath,
   };
@@ -373,7 +413,7 @@ export function getSyncPlanRegenerateReason(
     return "output-path-changed";
   }
 
-  if (previous.chapterNotes !== current.chapterNotes) {
+  if (hasDirtyInteractivePropertyChange(current.interactiveProperties, previous)) {
     return "properties-changed";
   }
 
@@ -824,6 +864,8 @@ export async function buildSyncPlan(
   );
 
   const bookSnapshots: BookSyncSnapshot[] = books.map((book) => {
+    const previous = previousState.assets[book.assetId];
+    const interactiveProperties = getStateInteractiveProperties(previous);
     const fingerprint = fingerprintByAssetId.get(book.assetId);
     const annotationModifiedAtForHash =
       book.format === "PDF" ? null : epubAnnotationMaxModificationDates.get(book.assetId) ?? null;
@@ -835,7 +877,8 @@ export async function buildSyncPlan(
       book,
       hash,
       bookFileRelativePath,
-      chapterNotes: previousState.assets[book.assetId]?.chapterNotes ?? false,
+      chapterNotes: interactiveProperties[BOOK_PROPERTY_KEYS.chapterNotes],
+      interactiveProperties,
       pdfAssetDirRelativePath:
         book.format === "PDF" && bookFileRelativePath
           ? path.posix.join("assets", "pdf", book.assetId)
@@ -854,7 +897,9 @@ export async function buildSyncPlan(
       }
       const existingMarkdown = await readPreviousBookMarkdown(outputDir, previous.bookFileRelativePath);
       snapshot.syncPaused = readBookSyncPaused(existingMarkdown);
-      snapshot.chapterNotes = readBookChapterNotes(existingMarkdown) ?? previous.chapterNotes;
+      snapshot.interactiveProperties = readBookInteractiveProperties(existingMarkdown) ?? getStateInteractiveProperties(previous);
+      snapshot.chapterNotes =
+        readBookChapterNotes(existingMarkdown) ?? snapshot.interactiveProperties[BOOK_PROPERTY_KEYS.chapterNotes];
     }),
   );
 
@@ -869,7 +914,7 @@ export async function buildSyncPlan(
         ? path.posix.basename(snapshot.bookFileRelativePath, ".md")
         : toShortBookFileStem(snapshot.book.title),
       bookFileRelativePath: snapshot.bookFileRelativePath,
-      chapterNotes: snapshot.chapterNotes,
+      interactiveProperties: toSyncInteractiveProperties(snapshot.interactiveProperties),
       pdfAssetDirRelativePath: snapshot.pdfAssetDirRelativePath,
     };
   }
@@ -897,7 +942,7 @@ export async function buildSyncPlan(
         format: snapshot.book.format,
         hash: snapshot.hash,
         bookFileRelativePath: snapshot.bookFileRelativePath,
-        chapterNotes: snapshot.chapterNotes,
+        interactiveProperties: snapshot.interactiveProperties,
       },
       previous,
     );
@@ -1126,7 +1171,15 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
             await removeDirectoryIfExists(path.join(outputDir, "assets", "pdf", snapshot.book.assetId));
             await removeFileIfExists(path.join(outputDir, "assets", "covers", `${snapshot.book.assetId}.png`));
           }
-          nextStateAssets[snapshot.book.assetId] = toSyncStateAsset(snapshot, null, false, [], null, null, syncStartedAt);
+          nextStateAssets[snapshot.book.assetId] = toSyncStateAsset(
+            snapshot,
+            null,
+            getDefaultBookInteractiveProperties(),
+            [],
+            null,
+            null,
+            syncStartedAt,
+          );
           stats.successBooks += 1;
           continue;
         }
@@ -1384,7 +1437,9 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
         nextStateAssets[snapshot.book.assetId] = toSyncStateAsset(
           snapshot,
           nextBookFileRelativePath,
-          nextBookFileRelativePath ? effectiveChapterNotes : false,
+          nextBookFileRelativePath
+            ? buildSyncedInteractiveProperties(effectiveChapterNotes)
+            : getDefaultBookInteractiveProperties(),
           nextBookFileRelativePath ? nextChapterFileRelativePaths : [],
           nextPdfAssetDirRelativePath,
           nextCoverImageRelativePath,

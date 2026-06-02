@@ -85,6 +85,8 @@ export type SyncStats = {
   generatedFiles: number;
 };
 
+export type SyncInteractiveProperties = Record<string, boolean | number | string | null>;
+
 export type SyncAssetState = {
   assetId: string;
   title: string;
@@ -92,8 +94,8 @@ export type SyncAssetState = {
   hash: string;
   lastSyncedAt: string | null;
   bookFileRelativePath: string | null;
-  chapterNotes: boolean;
   chapterFileRelativePaths: string[];
+  interactiveProperties: SyncInteractiveProperties;
   pdfAssetDirRelativePath: string | null;
   coverImageRelativePath: string | null;
 };

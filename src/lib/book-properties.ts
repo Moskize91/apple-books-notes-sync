@@ -22,9 +22,14 @@ export const BOOK_INTERACTIVE_PROPERTY_DEFAULTS = {
   [BOOK_PROPERTY_KEYS.chapterNotes]: false,
 } as const;
 
+export const BOOK_DIRTY_INTERACTIVE_PROPERTY_KEYS = [BOOK_PROPERTY_KEYS.chapterNotes] as const;
+
 export const BOOK_INTERACTIVE_PROPERTY_KEYS = Object.keys(
   BOOK_INTERACTIVE_PROPERTY_DEFAULTS,
 ) as Array<keyof typeof BOOK_INTERACTIVE_PROPERTY_DEFAULTS>;
+
+export type BookInteractivePropertyKey = keyof typeof BOOK_INTERACTIVE_PROPERTY_DEFAULTS;
+export type BookInteractivePropertyValues = Record<BookInteractivePropertyKey, boolean>;
 
 export const BOOK_PRESET_PROPERTY_KEYS = [
   BOOK_PROPERTY_KEYS.title,
@@ -132,6 +137,37 @@ export function readBookSyncPaused(markdown: string | null): boolean {
   const existingParts = splitFrontmatter(markdown);
   const existingProperties = existingParts ? parseFrontmatterObject(existingParts.frontmatter) : null;
   return existingProperties?.[BOOK_PROPERTY_KEYS.syncPaused] === true;
+}
+
+export function getDefaultBookInteractiveProperties(): BookInteractivePropertyValues {
+  return { ...BOOK_INTERACTIVE_PROPERTY_DEFAULTS };
+}
+
+export function normalizeBookInteractiveProperties(input: unknown): BookInteractivePropertyValues {
+  const source = isPlainObject(input) ? input : {};
+  const normalized = getDefaultBookInteractiveProperties();
+
+  for (const key of BOOK_INTERACTIVE_PROPERTY_KEYS) {
+    const value = source[key];
+    if (isValidInteractiveBookPropertyValue(key, value)) {
+      normalized[key] = value as boolean;
+    }
+  }
+
+  return normalized;
+}
+
+export function readBookInteractiveProperties(markdown: string | null): BookInteractivePropertyValues | null {
+  if (!markdown) {
+    return null;
+  }
+
+  const existingParts = splitFrontmatter(markdown);
+  const existingProperties = existingParts ? parseFrontmatterObject(existingParts.frontmatter) : null;
+  if (!existingProperties) {
+    return null;
+  }
+  return normalizeBookInteractiveProperties(existingProperties);
 }
 
 export function readBookChapterNotes(markdown: string | null): boolean | null {

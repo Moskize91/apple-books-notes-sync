@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { SyncAssetState, SyncState, SyncableBookFormat } from "./types";
+import { BOOK_PROPERTY_KEYS, normalizeBookInteractiveProperties } from "./book-properties";
 
 const STATE_FILE_NAME = ".sync-state.json";
 const STATE_DIR_NAME = ".absync";
@@ -34,7 +35,7 @@ function normalizeStateAsset(assetId: string, value: unknown): SyncAssetState | 
     return null;
   }
 
-  const candidate = value as Partial<SyncAssetState>;
+  const candidate = value as Partial<SyncAssetState> & { chapterNotes?: unknown };
   const format = asSyncableFormat(candidate.format);
   if (!format) {
     return null;
@@ -53,7 +54,17 @@ function normalizeStateAsset(assetId: string, value: unknown): SyncAssetState | 
   const coverImageRelativePath =
     typeof candidate.coverImageRelativePath === "string" ? candidate.coverImageRelativePath : null;
   const lastSyncedAt = typeof candidate.lastSyncedAt === "string" ? candidate.lastSyncedAt : null;
-  const chapterNotes = typeof candidate.chapterNotes === "boolean" ? candidate.chapterNotes : false;
+  const rawInteractiveProperties =
+    candidate.interactiveProperties && typeof candidate.interactiveProperties === "object"
+      ? candidate.interactiveProperties
+      : {};
+  const interactiveProperties = normalizeBookInteractiveProperties({
+    ...rawInteractiveProperties,
+    ...(typeof candidate.chapterNotes === "boolean" &&
+    !(BOOK_PROPERTY_KEYS.chapterNotes in rawInteractiveProperties)
+      ? { [BOOK_PROPERTY_KEYS.chapterNotes]: candidate.chapterNotes }
+      : {}),
+  });
   const chapterFileRelativePaths = Array.isArray(candidate.chapterFileRelativePaths)
     ? candidate.chapterFileRelativePaths.filter((item): item is string => typeof item === "string")
     : [];
@@ -65,8 +76,8 @@ function normalizeStateAsset(assetId: string, value: unknown): SyncAssetState | 
     hash: candidate.hash,
     lastSyncedAt,
     bookFileRelativePath: candidate.bookFileRelativePath ?? null,
-    chapterNotes,
     chapterFileRelativePaths,
+    interactiveProperties,
     pdfAssetDirRelativePath,
     coverImageRelativePath,
   };
