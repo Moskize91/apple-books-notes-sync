@@ -343,6 +343,43 @@ test("readEpubCoverImage reads EPUB3 cover-image from directory", async () => {
   assert.equal(cover?.toString(), "cover-bytes");
 });
 
+test("readEpubCoverImage reads prefixed EPUB2 cover metadata", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "epub-cover-prefixed-"));
+  const bookRoot = path.join(tempRoot, "book.epub");
+  await fs.mkdir(path.join(bookRoot, "META-INF"), { recursive: true });
+  await fs.mkdir(path.join(bookRoot, "OEBPS", "Images"), { recursive: true });
+
+  await fs.writeFile(
+    path.join(bookRoot, "META-INF", "container.xml"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <opf:rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+`,
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(bookRoot, "OEBPS", "package.opf"),
+    `<?xml version='1.0' encoding='utf-8'?>
+<ns0:package xmlns:ns0="http://www.idpf.org/2007/opf" version="2.0">
+  <ns0:metadata>
+    <ns0:meta content="cover-image" name="cover" />
+  </ns0:metadata>
+  <ns0:manifest>
+    <ns0:item href="Images/cover.png" id="cover-image" media-type="image/png" />
+  </ns0:manifest>
+</ns0:package>
+`,
+    "utf8",
+  );
+  await fs.writeFile(path.join(bookRoot, "OEBPS", "Images", "cover.png"), Buffer.from("prefixed-cover"));
+
+  const cover = await readEpubCoverImage(bookRoot);
+  assert.equal(cover?.toString(), "prefixed-cover");
+});
+
 test("readEpubPackageMetadata reads title creator and publisher from OPF", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "epub-metadata-"));
   const bookRoot = path.join(tempRoot, "book.epub");
