@@ -113,6 +113,62 @@ test("readEpubChapterTitleByKey resolves chapter labels from OPF and NCX", async
   assert.equal(chapterTitleByKey.get("id_7"), "《周髀算经》新论");
 });
 
+test("readEpubChapterTitleByKey resolves prefixed NCX chapter labels", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "epub-prefixed-ncx-map-"));
+  const bookRoot = path.join(tempRoot, "book.epub");
+  await fs.mkdir(path.join(bookRoot, "META-INF"), { recursive: true });
+  await fs.mkdir(path.join(bookRoot, "OEBPS"), { recursive: true });
+
+  await fs.writeFile(
+    path.join(bookRoot, "META-INF", "container.xml"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+`,
+    "utf8",
+  );
+
+  await fs.writeFile(
+    path.join(bookRoot, "OEBPS", "content.opf"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<ns0:package xmlns:ns0="http://www.idpf.org/2007/opf" version="2.0">
+  <ns0:manifest>
+    <ns0:item id="doc10" href="Text/chapter1.html" media-type="application/xhtml+xml"/>
+    <ns0:item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </ns0:manifest>
+  <ns0:spine toc="ncx">
+    <ns0:itemref idref="doc10"/>
+  </ns0:spine>
+</ns0:package>
+`,
+    "utf8",
+  );
+
+  await fs.mkdir(path.join(bookRoot, "OEBPS", "Text"), { recursive: true });
+  await fs.writeFile(
+    path.join(bookRoot, "OEBPS", "toc.ncx"),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<ns0:ncx xmlns:ns0="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <ns0:navMap>
+    <ns0:navPoint id="c65177-40" playOrder="10">
+      <ns0:navLabel>
+        <ns0:text>Introduction 导言</ns0:text>
+      </ns0:navLabel>
+      <ns0:content src="Text/chapter1.html" />
+    </ns0:navPoint>
+  </ns0:navMap>
+</ns0:ncx>
+`,
+    "utf8",
+  );
+
+  const chapterTitleByKey = await readEpubChapterTitleByKey(bookRoot);
+  assert.equal(chapterTitleByKey.get("doc10"), "Introduction 导言");
+});
+
 test("readEpubChapterTitleByKey resolves EPUB3 nav labels from OPF nav", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "epub-nav-map-"));
   const bookRoot = path.join(tempRoot, "book.epub");

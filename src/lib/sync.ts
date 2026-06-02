@@ -210,6 +210,7 @@ export type SyncPlan = {
 };
 
 const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
+const LEGACY_EPUB_INTERNAL_CHAPTER_HEADING_PATTERN = /^##\s+(?:.+\.x?html?|doc\d+)\s*$/im;
 const OUTPUT_SCHEMA_VERSION = 45;
 const PDF_PAGE_LINK_SCHEMA_VERSION = 5;
 const CHAPTER_NOTES_ANNOTATION_THRESHOLD = 100;
@@ -438,6 +439,10 @@ async function hasLegacyPdfFallbackMarker(outputDir: string, previous: SyncAsset
   }
 }
 
+export function hasLegacyEpubInternalChapterHeadingContent(content: string): boolean {
+  return LEGACY_EPUB_INTERNAL_CHAPTER_HEADING_PATTERN.test(content);
+}
+
 async function hasLegacyEpubInternalChapterHeading(outputDir: string, previous: SyncAssetState | undefined): Promise<boolean> {
   if (!previous?.bookFileRelativePath) {
     return false;
@@ -446,7 +451,7 @@ async function hasLegacyEpubInternalChapterHeading(outputDir: string, previous: 
   const absolutePath = path.join(outputDir, previous.bookFileRelativePath);
   try {
     const content = await fs.readFile(absolutePath, "utf8");
-    return /^##\s+.+\.x?html?\s*$/im.test(content);
+    return hasLegacyEpubInternalChapterHeadingContent(content);
   } catch {
     return false;
   }

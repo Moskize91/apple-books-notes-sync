@@ -184,12 +184,18 @@ function parseOpfManifest(opfXml: string): ParsedOpf {
 
 function parseTocHrefTitleMap(ncxXml: string): Map<string, string> {
   const hrefToTitle = new Map<string, string>();
-  const navPointPattern =
-    /<navPoint\b[\s\S]*?<navLabel>\s*<text>([\s\S]*?)<\/text>\s*<\/navLabel>[\s\S]*?<content\b[^>]*\bsrc="([^"]+)"/gi;
+  const navPointPattern = new RegExp(
+    `<${XML_NAME_PREFIX_PATTERN}navPoint\\b[\\s\\S]*?` +
+      `<${XML_NAME_PREFIX_PATTERN}navLabel\\b[^>]*>\\s*` +
+      `<${XML_NAME_PREFIX_PATTERN}text\\b[^>]*>([\\s\\S]*?)</${XML_NAME_PREFIX_PATTERN}text>\\s*` +
+      `</${XML_NAME_PREFIX_PATTERN}navLabel>[\\s\\S]*?` +
+      `<${XML_NAME_PREFIX_PATTERN}content\\b[^>]*\\bsrc\\s*=\\s*(?:"([^"]+)"|'([^']+)')`,
+    "gi",
+  );
   let navMatch = navPointPattern.exec(ncxXml);
   while (navMatch) {
     const title = decodeXmlEntities(navMatch[1] ?? "").replace(/\s+/g, " ").trim();
-    const src = decodeXmlEntities(navMatch[2] ?? "");
+    const src = decodeXmlEntities(navMatch[2] ?? navMatch[3] ?? "");
     const href = src.split("#")[0]?.trim();
     if (title && href && !hrefToTitle.has(href)) {
       hrefToTitle.set(href, title);

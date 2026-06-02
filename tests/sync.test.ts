@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getSyncPlanRegenerateReason, hasRenderablePdfPageAnnotations, shouldForcePdfResync } from "../src/lib/sync";
+import {
+  getSyncPlanRegenerateReason,
+  hasLegacyEpubInternalChapterHeadingContent,
+  hasRenderablePdfPageAnnotations,
+  shouldForcePdfResync,
+} from "../src/lib/sync";
 import type { PdfPageAnnotations, SyncAssetState } from "../src/lib/types";
 
 function buildAsset(assetId: string): SyncAssetState {
@@ -122,6 +127,12 @@ test("getSyncPlanRegenerateReason explains why an asset needs sync", () => {
     ),
     null,
   );
+});
+
+test("hasLegacyEpubInternalChapterHeadingContent detects internal chapter headings", () => {
+  assert.equal(hasLegacyEpubInternalChapterHeadingContent("# Book\n\n## doc10\n\n> quote"), true);
+  assert.equal(hasLegacyEpubInternalChapterHeadingContent("# Book\n\n## chapter.xhtml\n\n> quote"), true);
+  assert.equal(hasLegacyEpubInternalChapterHeadingContent("# Book\n\n## Introduction 导言\n\n> quote"), false);
 });
 
 test("hasRenderablePdfPageAnnotations detects PDF annotations with note content", () => {
