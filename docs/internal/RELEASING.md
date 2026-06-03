@@ -36,12 +36,12 @@ npm run pack:dry
 ```sh
 git switch main
 git pull --ff-only
-npm ci
-npm run check
 npm publish
 ```
 
-`prepublishOnly` 会再次运行 `npm run check`。npm 包只发布 `package.json` 中 `files` 指定的内容：
+`prepublishOnly` 会自动运行 `npm run check`。如果想在发布前做一次完全干净的依赖安装，可以额外运行 `npm ci`，但日常发布不需要。
+
+npm 包只发布 `package.json` 中 `files` 指定的内容：
 
 - `lib/`
 - `tools/`
