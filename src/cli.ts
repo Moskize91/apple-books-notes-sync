@@ -3,6 +3,7 @@
 import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
+import { registerBaseCommand } from "./commands/base";
 import { registerBooksCommand } from "./commands/books";
 import { registerDoctorCommand } from "./commands/doctor";
 import { registerPlanCommand } from "./commands/plan";
@@ -35,6 +36,7 @@ Help:
 
     absync plan --help
     absync sync --help
+    absync base create --help
     absync books --help
     absync doctor --help
     absync vaults --help
@@ -60,13 +62,15 @@ Vault selection:
 
 Rules:
   The target vault must have the Apple Books Notes Sync plugin installed and enabled.
-  absync reads Apple Books data from the local macOS Apple Books databases.
-  absync writes only inside the managed output directory under the selected vault.
+  Sync commands read Apple Books data from the local macOS Apple Books databases.
+  Sync writes only inside the managed output directory under the selected vault.
+  Base commands write only the requested vault-relative .base file.
 `,
   );
 
 registerPlanCommand(program);
 registerSyncCommand(program);
+registerBaseCommand(program);
 registerBooksCommand(program);
 registerDoctorCommand(program);
 registerVaultsCommand(program);

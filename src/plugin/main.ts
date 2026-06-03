@@ -5,6 +5,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import {
+  getDefaultBooksBaseRelativePath,
+  normalizeVaultRelativePath,
+  renderBooksBase,
+} from "../lib/books-base";
+import {
   getPluginDir,
   getDefaultPluginSettings,
   normalizePluginSettings,
@@ -179,6 +184,13 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
         void this.runDoctorCommand();
       },
     });
+    this.addCommand({
+      id: "create-books-base",
+      name: "Create Books.base",
+      callback: () => {
+        void this.createBooksBase();
+      },
+    });
   }
 
   async loadSettings(): Promise<void> {
@@ -289,6 +301,48 @@ export default class AppleBooksNotesSyncPlugin extends Plugin {
     return {
       vaultDir: this.getVaultDir(),
     };
+  }
+
+  private getBooksBaseRelativePath(): string {
+    return getDefaultBooksBaseRelativePath(this.settings.managedDirName);
+  }
+
+  private async ensureVaultFolder(folderPath: string): Promise<void> {
+    const normalized = normalizeVaultRelativePath(folderPath, "folder path");
+    const parts = normalized.split("/");
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      if (this.app.vault.getAbstractFileByPath(current)) {
+        continue;
+      }
+      await this.app.vault.createFolder(current);
+    }
+  }
+
+  async createBooksBase(): Promise<void> {
+    const basePath = this.getBooksBaseRelativePath();
+    try {
+      normalizeVaultRelativePath(basePath, "base path");
+      const existing = this.app.vault.getAbstractFileByPath(basePath);
+      if (existing) {
+        await this.app.workspace.openLinkText(basePath, "", false);
+        new Notice(`Apple Books Notes Sync: ${basePath} already exists.`, 8000);
+        return;
+      }
+
+      const folderPath = path.posix.dirname(basePath);
+      if (folderPath !== ".") {
+        await this.ensureVaultFolder(folderPath);
+      }
+
+      await this.app.vault.create(basePath, renderBooksBase({ managedDirName: this.settings.managedDirName }));
+      await this.app.workspace.openLinkText(basePath, "", false);
+      new Notice(`Apple Books Notes Sync: created ${basePath}.`, 8000);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Apple Books Notes Sync: failed to create Books.base. ${message}`, 12000);
+    }
   }
 
   private async previewPlan(): Promise<void> {
@@ -1024,6 +1078,15 @@ class AppleBooksNotesSyncSettingTab extends PluginSettingTab {
               await this.plugin.saveSettings();
             })();
           });
+      });
+
+    new Setting(containerEl)
+      .setName("Books Base")
+      .setDesc("Create the Obsidian Bases view for synced book notes.")
+      .addButton((button) => {
+        button.setButtonText("Create Books.base").onClick(() => {
+          void this.plugin.createBooksBase();
+        });
       });
 
     new Setting(containerEl)

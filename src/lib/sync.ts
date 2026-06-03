@@ -43,7 +43,6 @@ import {
   renderPdfChapterMarkdown,
   renderBookFrontmatterMarkdown,
   renderEpubBookMarkdown,
-  renderIndexMarkdown,
   renderPdfBookMarkdown,
   type RenderedMarkdownFile,
 } from "./render-markdown";
@@ -1066,16 +1065,7 @@ export async function buildSyncPlan(
 
 export async function runSync(config: SyncConfig, paths: IBooksPaths, options: SyncOptions): Promise<SyncResult> {
   const plan = await buildSyncPlan(config, paths, { bookFilter: options.bookFilter });
-  const {
-    outputDir,
-    booksDirName,
-    isFullSync,
-    allBooks,
-    changedSnapshots,
-    previousStateAssets,
-    nextStateAssets,
-    removedAssetIds,
-  } = plan;
+  const { outputDir, isFullSync, changedSnapshots, previousStateAssets, nextStateAssets, removedAssetIds } = plan;
   const stagingRoot = path.join(outputDir, ".staging", `${Date.now()}-${process.pid}`);
   const syncStartedAt = new Date().toISOString();
   const vaultName = path.basename(path.resolve(config.vaultDir));
@@ -1531,22 +1521,6 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
         }
       }
       return { stats, outputDir };
-    }
-
-    if (isFullSync) {
-      const indexedAssetIds = new Set(
-        Object.values(nextStateAssets)
-          .filter((asset) => asset.bookFileRelativePath)
-          .map((asset) => asset.assetId),
-      );
-      const indexBooks = allBooks.filter((book) => indexedAssetIds.has(book.assetId));
-      const indexBookPaths = new Map<string, string | null>();
-      for (const [assetId, asset] of Object.entries(nextStateAssets)) {
-        indexBookPaths.set(assetId, asset.bookFileRelativePath);
-      }
-      const indexMarkdown = renderIndexMarkdown(indexBooks, new Date(), booksDirName, indexBookPaths, nextStateAssets);
-      await writeFileAtomically(path.join(outputDir, "index.md"), indexMarkdown);
-      stats.generatedFiles += 1;
     }
 
     await writeSyncState(outputDir, nextStateAssets);
