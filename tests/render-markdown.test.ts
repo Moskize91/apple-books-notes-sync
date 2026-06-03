@@ -340,6 +340,10 @@ test("renderEpubChapterIndexMarkdown links generated chapter notes", () => {
       ["id_1", 1],
       ["id_2", 2],
     ]),
+    new Map([
+      ["id_1", ["第一部分", "第一章"]],
+      ["id_2", ["第一部分", "第二章"]],
+    ]),
   );
 
   const indexOutput = renderEpubChapterIndexMarkdown(demoBook, chapters, [
@@ -349,8 +353,10 @@ test("renderEpubChapterIndexMarkdown links generated chapter notes", () => {
   const chapterOutput = renderEpubChapterMarkdown(demoBook, chapters[1]!, 2);
 
   assert.match(indexOutput, /chapter_notes: true/);
-  assert.match(indexOutput, /\[\[books\/Demo Book\/001-第一章\|第一章\]\]/);
-  assert.match(indexOutput, /\| \[\[books\/Demo Book\/002-第二章\|第二章\]\] \| 1 \|/);
+  assert.doesNotMatch(indexOutput, /\| 章节 \|/);
+  assert.match(indexOutput, /- \*\*第一部分\*\*/);
+  assert.match(indexOutput, / {2}- \[\[books\/Demo Book\/001-第一章\|第一章\]\]/);
+  assert.match(indexOutput, / {2}- \[\[books\/Demo Book\/002-第二章\|第二章\]\]/);
   assert.match(chapterOutput, /book_title: "Demo Book"/);
   assert.match(chapterOutput, /chapter: "第二章"/);
   assert.match(chapterOutput, /Second chapter quote/);
@@ -468,8 +474,8 @@ test("renderPdf chapter helpers group pages by outline leaves", () => {
     },
   ];
   const chapters = buildPdfRenderedChapters(pages, [
-    { title: "PDF 第一章", pageNumber: 1, order: 0 },
-    { title: "PDF 第二章", pageNumber: 8, order: 1 },
+    { title: "PDF 第一章", titlePath: ["第一部分", "PDF 第一章"], pageNumber: 1, order: 0 },
+    { title: "PDF 第二章", titlePath: ["第三部分", "PDF 第二章"], pageNumber: 8, order: 1 },
   ]);
 
   const indexOutput = renderPdfChapterIndexMarkdown(pdfBook, chapters, [
@@ -480,7 +486,11 @@ test("renderPdf chapter helpers group pages by outline leaves", () => {
 
   assert.equal(chapters.length, 2);
   assert.match(indexOutput, /chapter_notes: true/);
-  assert.match(indexOutput, /\[\[books\/Demo Book\/002-PDF 第二章\|PDF 第二章\]\]/);
+  assert.doesNotMatch(indexOutput, /\| 章节 \|/);
+  assert.match(indexOutput, /- \*\*第一部分\*\*/);
+  assert.match(indexOutput, / {2}- \[\[books\/Demo Book\/001-PDF 第一章\|PDF 第一章\]\]/);
+  assert.match(indexOutput, /- \*\*第三部分\*\*/);
+  assert.match(indexOutput, / {2}- \[\[books\/Demo Book\/002-PDF 第二章\|PDF 第二章\]\]/);
   assert.match(chapterOutput, /chapter: "PDF 第二章"/);
   assert.match(chapterOutput, /last_modified_at: 2026-05-31T01:02:03/);
   assert.match(chapterOutput, /Chapter two page/);

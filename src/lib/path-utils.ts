@@ -15,6 +15,10 @@ export function expandHome(inputPath: string): string {
 
 export function sanitizeFileName(input: string): string {
   const sanitized = input
+    .replace(/./gs, (character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 0x1f || codePoint === 0x7f ? " " : character;
+    })
     .replace(/[<>:"/\\|?*]/g, "_")
     .replace(/\s+/g, " ")
     .trim();

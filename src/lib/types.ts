@@ -73,6 +73,7 @@ export type PdfPageAnnotations = {
 
 export type PdfOutlineLeaf = {
   title: string;
+  titlePath?: string[];
   pageNumber: number;
   order: number;
 };
