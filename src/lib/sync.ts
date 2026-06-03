@@ -55,6 +55,7 @@ import {
   hasBookMarkdownPropertyDrift,
   mergeBookMarkdownProperties,
   normalizeBookInteractiveProperties,
+  readBookAnnotatedPages,
   readBookChapterNotes,
   readBookInteractiveProperties,
   readBookSyncPaused,
@@ -798,6 +799,11 @@ function renderBookFrontmatterForSnapshot(
 function readExistingPdfAnnotatedPages(markdown: string | null): number {
   if (!markdown) {
     return 0;
+  }
+
+  const frontmatterAnnotatedPages = readBookAnnotatedPages(markdown);
+  if (frontmatterAnnotatedPages !== null) {
+    return frontmatterAnnotatedPages;
   }
 
   const matches = markdown.match(/<a href="[^"]*">第 \d+ 页<\/a>/g);
