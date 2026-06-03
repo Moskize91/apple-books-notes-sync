@@ -128,13 +128,27 @@ absync sync --dry-run
 absync sync --book "Newton"
 ```
 
+### `absync base create`
+
+Create the Obsidian Bases view for synced book notes. By default this writes
+`<managedDirName>/Books.base` and does not overwrite an existing file.
+
+```sh
+absync base create
+absync base create --vault "MyVault"
+absync base create --path "Apple Books Notes/Books.base"
+absync base create --overwrite
+```
+
 Managed output layout:
 
 ```text
 <vault>/<managedDirName>/
-  index.md
+  Books.base
   books/
     <book>.md
+    <book>/
+      <chapter>.md
   assets/
     covers/
       <asset-id>.png

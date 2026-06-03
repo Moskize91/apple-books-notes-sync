@@ -122,13 +122,27 @@ absync sync --dry-run
 absync sync --book "Newton"
 ```
 
+### `absync base create`
+
+创建用于浏览同步书籍笔记的 Obsidian Bases 视图。默认写入
+`<managedDirName>/Books.base`，且不会覆盖已有文件。
+
+```sh
+absync base create
+absync base create --vault "MyVault"
+absync base create --path "Apple Books Notes/Books.base"
+absync base create --overwrite
+```
+
 输出目录结构：
 
 ```text
 <vault>/<managedDirName>/
-  index.md
+  Books.base
   books/
     <book>.md
+    <book>/
+      <chapter>.md
   assets/
     covers/
       <asset-id>.png

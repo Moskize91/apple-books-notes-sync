@@ -40,9 +40,11 @@ Prerequisites:
 
 Output layout:
   <vault>/<managedDirName>/
-    index.md
+    Books.base
     books/
       <book>.md
+      <book>/
+        <chapter>.md
   assets/
     covers/
       <asset-id>.png
@@ -53,6 +55,7 @@ Write rules:
   absync writes inside <vault>/<managedDirName>.
   A full sync may remove stale files that were previously managed by absync.
   A filtered sync with --book updates matching books only and does not process removals.
+  Obsidian .base files are never overwritten or removed by sync.
 
 PDF rendering:
   Controlled by the target vault's plugin settings.
