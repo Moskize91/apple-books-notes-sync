@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   extractChapterKey,
   readEpubChapterTitleByKey,
+  readEpubChapterTitlePathByKey,
   readEpubCoverImage,
   readEpubPackageMetadata,
   sortEpubAnnotations,
@@ -212,8 +213,13 @@ test("readEpubChapterTitleByKey resolves EPUB3 nav labels from OPF nav", async (
   <body>
     <nav epub:type="toc" id="toc">
       <ol>
-        <li><a href="text/chapter-1.xhtml#p1">第一章 导论</a></li>
-        <li><a href="text/chapter-2.xhtml#p1">第二章 展开</a></li>
+        <li>
+          <span>第一部分</span>
+          <ol>
+            <li><a href="text/chapter-1.xhtml#p1">第一章 导论</a></li>
+            <li><a href="text/chapter-2.xhtml#p1">第二章 展开</a></li>
+          </ol>
+        </li>
       </ol>
     </nav>
   </body>
@@ -223,8 +229,11 @@ test("readEpubChapterTitleByKey resolves EPUB3 nav labels from OPF nav", async (
   );
 
   const chapterTitleByKey = await readEpubChapterTitleByKey(bookRoot);
+  const chapterTitlePathByKey = await readEpubChapterTitlePathByKey(bookRoot);
   assert.equal(chapterTitleByKey.get("chapter_1"), "第一章 导论");
   assert.equal(chapterTitleByKey.get("chapter_2"), "第二章 展开");
+  assert.deepEqual(chapterTitlePathByKey.get("chapter_1"), ["第一部分", "第一章 导论"]);
+  assert.deepEqual(chapterTitlePathByKey.get("chapter_2"), ["第一部分", "第二章 展开"]);
 });
 
 test("readEpubChapterTitleByKey resolves nested HTML table of contents links", async () => {

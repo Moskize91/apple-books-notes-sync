@@ -379,24 +379,27 @@ async function flattenPdfOutlineLeaves(
   document: PdfDestinationDocument,
   items: PdfJsOutlineItem[],
   result: PdfOutlineLeaf[],
+  parentTitles: string[] = [],
 ): Promise<void> {
   for (const item of items) {
-    const children = item.items ?? [];
-    if (children.length > 0) {
-      await flattenPdfOutlineLeaves(document, children, result);
-      continue;
-    }
-
     const title = item.title?.replace(/\s+/g, " ").trim();
     if (!title) {
       continue;
     }
+    const titlePath = [...parentTitles, title];
+    const children = item.items ?? [];
+    if (children.length > 0) {
+      await flattenPdfOutlineLeaves(document, children, result, titlePath);
+      continue;
+    }
+
     const pageNumber = await resolvePdfDestPageNumber(document, item.dest);
     if (!pageNumber) {
       continue;
     }
     result.push({
       title,
+      titlePath,
       pageNumber,
       order: result.length,
     });

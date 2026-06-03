@@ -11,6 +11,7 @@ import {
   getXmlAttr,
   getXmlText,
   parseXmlDocument,
+  type XmlNode,
 } from "./xml-ns";
 
 const CHAPTER_PATTERN = /\[([^\]]+)\]/;
@@ -36,6 +37,12 @@ export type EpubPackageMetadata = {
   title: string | null;
   creator: string | null;
   publisher: string | null;
+};
+
+type EpubTocNode = {
+  title: string;
+  href: string | null;
+  children: EpubTocNode[];
 };
 
 function parseOpfMetadata(opfXml: string): EpubPackageMetadata {
@@ -152,6 +159,119 @@ function parseTocHrefTitleMap(ncxXml: string): Map<string, string> {
     }
   }
   return hrefToTitle;
+}
+
+function splitHrefPath(href: string | null): string | null {
+  if (!href) {
+    return null;
+  }
+  return href.split("#")[0]?.trim() || null;
+}
+
+function parseNcxTocNode(navPoint: XmlNode): EpubTocNode | null {
+  const navLabel = findXmlChild(navPoint, "navLabel");
+  const text = navLabel ? findXmlChild(navLabel, "text") : null;
+  const title = text ? getXmlText(text).replace(/\s+/g, " ").trim() : "";
+  if (!title) {
+    return null;
+  }
+  const content = findXmlChild(navPoint, "content");
+  return {
+    title,
+    href: splitHrefPath(content ? getXmlAttr(content, "src") : null),
+    children: findXmlChildren(navPoint, "navPoint")
+      .map((child) => parseNcxTocNode(child))
+      .filter((node): node is EpubTocNode => Boolean(node)),
+  };
+}
+
+function parseNcxTocForest(ncxXml: string): EpubTocNode[] {
+  const root = parseXmlDocument(ncxXml);
+  const navMap = root ? findXmlDescendant(root, "navMap") : null;
+  return (navMap ? findXmlChildren(navMap, "navPoint") : [])
+    .map((navPoint) => parseNcxTocNode(navPoint))
+    .filter((node): node is EpubTocNode => Boolean(node));
+}
+
+function findFirstDirectChild(node: XmlNode, names: string[]): XmlNode | null {
+  for (const child of node.children) {
+    if (names.includes(child.localName)) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function parseNavLiTocNode(li: XmlNode): EpubTocNode | null {
+  const titleNode = findFirstDirectChild(li, ["a", "span"]);
+  const title = titleNode ? getXmlText(titleNode).replace(/\s+/g, " ").trim() : "";
+  if (!title) {
+    return null;
+  }
+  const childOl = findXmlChild(li, "ol");
+  return {
+    title,
+    href: titleNode?.localName === "a" ? splitHrefPath(getXmlAttr(titleNode, "href")) : null,
+    children: (childOl ? findXmlChildren(childOl, "li") : [])
+      .map((child) => parseNavLiTocNode(child))
+      .filter((node): node is EpubTocNode => Boolean(node)),
+  };
+}
+
+function parseNavTocForest(navXml: string): EpubTocNode[] {
+  const root = parseXmlDocument(navXml);
+  if (!root) {
+    return [];
+  }
+  const navs = findXmlDescendants(root, "nav");
+  const tocNav = navs.find((nav) => getXmlAttr(nav, "type") === "toc") ?? root;
+  const ol = findXmlDescendant(tocNav, "ol");
+  if (ol) {
+    return findXmlChildren(ol, "li")
+      .map((li) => parseNavLiTocNode(li))
+      .filter((node): node is EpubTocNode => Boolean(node));
+  }
+  return findXmlDescendants(tocNav, "a")
+    .map((link): EpubTocNode | null => {
+      const title = getXmlText(link).replace(/\s+/g, " ").trim();
+      if (!title) {
+        return null;
+      }
+      const node: EpubTocNode = { title, href: splitHrefPath(getXmlAttr(link, "href")), children: [] };
+      return node;
+    })
+    .filter((node): node is EpubTocNode => Boolean(node));
+}
+
+function buildManifestKeyByResolvedPath(
+  manifestHrefById: Map<string, string>,
+  opfRelativePath: string,
+): Map<string, string> {
+  const keyByPath = new Map<string, string>();
+  const opfDir = path.posix.dirname(opfRelativePath);
+  for (const [key, href] of manifestHrefById.entries()) {
+    keyByPath.set(resolveEpubRelativePath(opfDir, href), key);
+  }
+  return keyByPath;
+}
+
+function addTocTitlePaths(
+  target: Map<string, string[]>,
+  nodes: EpubTocNode[],
+  tocRelativePath: string,
+  manifestKeyByResolvedPath: Map<string, string>,
+  parentTitles: string[] = [],
+): void {
+  const tocDir = path.posix.dirname(tocRelativePath);
+  for (const node of nodes) {
+    const titlePath = [...parentTitles, node.title];
+    const resolvedPath = node.href ? resolveEpubRelativePath(tocDir, node.href) : null;
+    const key = resolvedPath ? manifestKeyByResolvedPath.get(resolvedPath) : undefined;
+    if (key && !target.has(key)) {
+      target.set(key, titlePath);
+    }
+    addTocTitlePaths(target, node.children, tocRelativePath, manifestKeyByResolvedPath, titlePath);
+  }
 }
 
 function parseNavHrefTitleMap(navXml: string): Map<string, string> {
@@ -372,6 +492,73 @@ export async function readEpubChapterTitleByKey(bookPath: string | null): Promis
   }
 
   return new Map<string, string>();
+}
+
+export async function readEpubChapterTitlePathByKey(bookPath: string | null): Promise<Map<string, string[]>> {
+  if (!bookPath) {
+    return new Map<string, string[]>();
+  }
+
+  const stat = await fs.stat(bookPath).catch(() => null);
+  if (!stat || (!stat.isDirectory() && !stat.isFile())) {
+    return new Map<string, string[]>();
+  }
+  const isDirectory = stat.isDirectory();
+
+  const containerXml = await readEpubEntryText(bookPath, isDirectory, "META-INF/container.xml");
+  if (!containerXml) {
+    return new Map<string, string[]>();
+  }
+
+  const rootfileRelativePath = normalizeEpubRelativePath(findRootfilePath(containerXml) ?? "OEBPS/content.opf");
+  const opfXml = await readEpubEntryText(bookPath, isDirectory, rootfileRelativePath);
+  if (!opfXml) {
+    return new Map<string, string[]>();
+  }
+
+  const { manifestHrefById, manifestMediaTypeById, ncxItemId, navItemId } = parseOpfManifest(opfXml);
+  const titlePathByKey = new Map<string, string[]>();
+  const manifestKeyByResolvedPath = buildManifestKeyByResolvedPath(manifestHrefById, rootfileRelativePath);
+  const opfDir = path.posix.dirname(rootfileRelativePath);
+
+  if (ncxItemId) {
+    const ncxHref = manifestHrefById.get(ncxItemId);
+    if (ncxHref) {
+      const ncxRelativePath = resolveEpubRelativePath(opfDir, ncxHref);
+      const ncxXml = await readEpubEntryText(bookPath, isDirectory, ncxRelativePath);
+      if (ncxXml) {
+        addTocTitlePaths(titlePathByKey, parseNcxTocForest(ncxXml), ncxRelativePath, manifestKeyByResolvedPath);
+      }
+    }
+  }
+
+  if (navItemId) {
+    const navHref = manifestHrefById.get(navItemId);
+    if (navHref) {
+      const navRelativePath = resolveEpubRelativePath(opfDir, navHref);
+      const navXml = await readEpubEntryText(bookPath, isDirectory, navRelativePath);
+      if (navXml) {
+        addTocTitlePaths(titlePathByKey, parseNavTocForest(navXml), navRelativePath, manifestKeyByResolvedPath);
+      }
+    }
+  }
+
+  for (const [itemId, href] of manifestHrefById.entries()) {
+    if (itemId === navItemId || itemId === ncxItemId) {
+      continue;
+    }
+    const mediaType = manifestMediaTypeById.get(itemId) ?? "";
+    if (!/x?html/i.test(mediaType)) {
+      continue;
+    }
+    const relativePath = resolveEpubRelativePath(opfDir, href);
+    const html = await readEpubEntryText(bookPath, isDirectory, relativePath);
+    if (html && isHtmlTocDocument(html)) {
+      addTocTitlePaths(titlePathByKey, parseNavTocForest(html), relativePath, manifestKeyByResolvedPath);
+    }
+  }
+
+  return titlePathByKey;
 }
 
 export async function readEpubChapterOrderByKey(bookPath: string | null): Promise<Map<string, number>> {

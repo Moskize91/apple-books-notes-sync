@@ -23,6 +23,10 @@ test("toShortBookFileStem truncates to 40 chars", () => {
   assert.equal(stem, "1234567890123456789012345678901234567890");
 });
 
+test("toShortBookFileStem removes control characters", () => {
+  assert.equal(toShortBookFileStem("第一节\u0000 复归\n增长"), "第一节 复归 增长");
+});
+
 test("buildBookFileRelativePathByAssetId adds numeric suffix for collisions", () => {
   const books = [
     makeBook("BBBBBBBB11111111", "Same Title"),

@@ -19,6 +19,7 @@ type PdfRenderedPage = {
 
 export type PdfRenderedChapter = {
   title: string;
+  titlePath?: string[];
   pageNumber: number;
   order: number;
   pages: PdfRenderedPage[];
@@ -26,6 +27,7 @@ export type PdfRenderedChapter = {
 
 export type EpubRenderedChapter = {
   title: string;
+  titlePath?: string[];
   order: number;
   annotations: EpubAnnotation[];
 };
@@ -254,6 +256,65 @@ function buildWikiLink(targetRelativePath: string, label: string): string {
   return `[[${target}|${escapedLabel || target}]]`;
 }
 
+type ChapterIndexListNode = {
+  title: string;
+  relativePath: string | null;
+  children: ChapterIndexListNode[];
+};
+
+function normalizeChapterTitlePath(title: string, titlePath?: string[]): string[] {
+  const normalizedPath = (titlePath ?? [])
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter((part) => part.length > 0);
+  if (normalizedPath.length > 0) {
+    return normalizedPath;
+  }
+  const normalizedTitle = title.replace(/\s+/g, " ").trim();
+  return [normalizedTitle || "未分章"];
+}
+
+function getOrCreateChildNode(parent: ChapterIndexListNode, title: string): ChapterIndexListNode {
+  let child = parent.children.find((node) => node.title === title);
+  if (!child) {
+    child = { title, relativePath: null, children: [] };
+    parent.children.push(child);
+  }
+  return child;
+}
+
+function pushChapterIndexListLines(
+  lines: string[],
+  chapters: Array<{ title: string; titlePath?: string[] }>,
+  chapterFileRelativePaths: string[],
+): void {
+  const root: ChapterIndexListNode = { title: "", relativePath: null, children: [] };
+  for (const [index, chapter] of chapters.entries()) {
+    const relativePath = chapterFileRelativePaths[index];
+    if (!relativePath) {
+      continue;
+    }
+    let current = root;
+    for (const part of normalizeChapterTitlePath(chapter.title, chapter.titlePath)) {
+      current = getOrCreateChildNode(current, part);
+    }
+    current.relativePath = relativePath;
+  }
+
+  const renderNode = (node: ChapterIndexListNode, depth: number): void => {
+    const indent = "  ".repeat(depth);
+    const label = node.relativePath ? buildWikiLink(node.relativePath, node.title) : `**${node.title}**`;
+    lines.push(`${indent}- ${label}`);
+    for (const child of node.children) {
+      renderNode(child, depth + 1);
+    }
+  };
+
+  for (const child of root.children) {
+    renderNode(child, 0);
+  }
+  lines.push("");
+}
+
 function buildPdfOpenUrl(book: Book, vaultName?: string | null, pageNumber?: number): string {
   if (!book.path) {
     return "#";
@@ -312,16 +373,23 @@ export function buildEpubRenderedChapters(
   annotations: EpubAnnotation[],
   chapterTitleByKey?: Map<string, string>,
   chapterOrderByKey?: Map<string, number>,
+  chapterTitlePathByKey?: Map<string, string[]>,
 ): EpubRenderedChapter[] {
   const sortedAnnotations = [...annotations].sort((left, right) => {
     return compareEpubAnnotationsBySourceOrder(left, right, chapterOrderByKey);
   });
 
-  const chapterMap = new Map<string, { order: number; annotations: EpubAnnotation[] }>();
+  const chapterMap = new Map<
+    string,
+    { title: string; titlePath: string[] | null; order: number; annotations: EpubAnnotation[] }
+  >();
   for (const annotation of sortedAnnotations) {
     const chapterDisplayKey = toDisplayChapterKey(annotation.chapterKey, chapterTitleByKey);
+    const chapterTitlePath = chapterTitlePathByKey?.get(annotation.chapterKey);
+    const normalizedTitlePath = chapterTitlePath ? normalizeChapterTitlePath(chapterDisplayKey, chapterTitlePath) : undefined;
     const chapterOrder = chapterOrderByKey?.get(annotation.chapterKey) ?? Number.MAX_SAFE_INTEGER;
-    const existing = chapterMap.get(chapterDisplayKey);
+    const chapterMapKey = normalizedTitlePath?.join("\0") ?? chapterDisplayKey;
+    const existing = chapterMap.get(chapterMapKey);
     if (existing) {
       existing.annotations.push(annotation);
       if (chapterOrder < existing.order) {
@@ -329,13 +397,19 @@ export function buildEpubRenderedChapters(
       }
       continue;
     }
-    chapterMap.set(chapterDisplayKey, { order: chapterOrder, annotations: [annotation] });
+    chapterMap.set(chapterMapKey, {
+      title: normalizedTitlePath?.[normalizedTitlePath.length - 1] ?? chapterDisplayKey,
+      titlePath: normalizedTitlePath ?? null,
+      order: chapterOrder,
+      annotations: [annotation],
+    });
   }
 
-  return Array.from(chapterMap.entries())
-    .map(([title, value]) => {
+  return Array.from(chapterMap.values())
+    .map((value) => {
       return {
-        title,
+        title: value.title,
+        ...(value.titlePath ? { titlePath: value.titlePath } : {}),
         order: value.order,
         annotations: value.annotations,
       };
@@ -364,16 +438,7 @@ export function renderEpubChapterIndexMarkdown(
     return lines.join("\n");
   }
 
-  lines.push("| 章节 | 标注 |");
-  lines.push("| --- | ---: |");
-  for (const [index, chapter] of chapters.entries()) {
-    const relativePath = chapterFileRelativePaths[index];
-    if (!relativePath) {
-      continue;
-    }
-    lines.push(`| ${buildWikiLink(relativePath, chapter.title)} | ${chapter.annotations.length} |`);
-  }
-  lines.push("");
+  pushChapterIndexListLines(lines, chapters, chapterFileRelativePaths);
   return lines.join("\n");
 }
 
@@ -498,6 +563,7 @@ export function buildPdfRenderedChapters(
     }
     chapters.push({
       title: leaf.title,
+      ...(leaf.titlePath ? { titlePath: leaf.titlePath } : {}),
       pageNumber: leaf.pageNumber,
       order: leaf.order,
       pages: chapterPages,
@@ -523,17 +589,7 @@ export function renderPdfChapterIndexMarkdown(
     return lines.join("\n");
   }
 
-  lines.push("| 章节 | 页数 | 标注 |");
-  lines.push("| --- | ---: | ---: |");
-  for (const [index, chapter] of chapters.entries()) {
-    const relativePath = chapterFileRelativePaths[index];
-    if (!relativePath) {
-      continue;
-    }
-    const noteCount = chapter.pages.reduce((total, page) => total + page.notes.length, 0);
-    lines.push(`| ${buildWikiLink(relativePath, chapter.title)} | ${chapter.pages.length} | ${noteCount} |`);
-  }
-  lines.push("");
+  pushChapterIndexListLines(lines, chapters, chapterFileRelativePaths);
   return lines.join("\n");
 }
 

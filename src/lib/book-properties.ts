@@ -181,6 +181,17 @@ export function readBookChapterNotes(markdown: string | null): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
+export function readBookAnnotatedPages(markdown: string | null): number | null {
+  if (!markdown) {
+    return null;
+  }
+
+  const existingParts = splitFrontmatter(markdown);
+  const existingProperties = existingParts ? parseFrontmatterObject(existingParts.frontmatter) : null;
+  const value = existingProperties?.[BOOK_PROPERTY_KEYS.annotatedPages];
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
 function splitFrontmatter(markdown: string): FrontmatterParts | null {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
   if (!match) {

@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasBookMarkdownPropertyDrift, mergeBookMarkdownProperties, readBookChapterNotes } from "../src/lib/book-properties";
+import {
+  hasBookMarkdownPropertyDrift,
+  mergeBookMarkdownProperties,
+  readBookAnnotatedPages,
+  readBookChapterNotes,
+} from "../src/lib/book-properties";
 
 test("mergeBookMarkdownProperties preserves user fields and rewrites managed fields", () => {
   const generated = `---
@@ -211,4 +216,38 @@ body
     null,
   );
   assert.equal(readBookChapterNotes(null), null);
+});
+
+test("readBookAnnotatedPages reads only valid non-negative integers", () => {
+  assert.equal(
+    readBookAnnotatedPages(`---
+title: "PDF"
+annotated_pages: 12
+---
+
+body
+`),
+    12,
+  );
+  assert.equal(
+    readBookAnnotatedPages(`---
+title: "PDF"
+annotated_pages: "12"
+---
+
+body
+`),
+    null,
+  );
+  assert.equal(
+    readBookAnnotatedPages(`---
+title: "PDF"
+annotated_pages: -1
+---
+
+body
+`),
+    null,
+  );
+  assert.equal(readBookAnnotatedPages(null), null);
 });

@@ -9,7 +9,14 @@ import {
   readEpubAnnotations,
 } from "./ibooks-data";
 import { buildBookFileRelativePathByAssetId, toShortBookFileStem } from "./book-file-name";
-import { readEpubChapterOrderByKey, readEpubChapterTitleByKey, readEpubCoverImage, sortEpubAnnotations } from "./epub";
+import { CHAPTER_NOTES_ANNOTATION_THRESHOLD } from "./chapter-notes";
+import {
+  readEpubChapterOrderByKey,
+  readEpubChapterTitleByKey,
+  readEpubChapterTitlePathByKey,
+  readEpubCoverImage,
+  sortEpubAnnotations,
+} from "./epub";
 import { log } from "./logger";
 import {
   extractPdfQuoteContent,
@@ -48,6 +55,7 @@ import {
   hasBookMarkdownPropertyDrift,
   mergeBookMarkdownProperties,
   normalizeBookInteractiveProperties,
+  readBookAnnotatedPages,
   readBookChapterNotes,
   readBookInteractiveProperties,
   readBookSyncPaused,
@@ -213,7 +221,6 @@ const LEGACY_PDF_FALLBACK_MARKER = "当前版本无法展开内容";
 const LEGACY_EPUB_INTERNAL_CHAPTER_HEADING_PATTERN = /^##\s+(?:.+\.x?html?|doc\d+)\s*$/im;
 const OUTPUT_SCHEMA_VERSION = 45;
 const PDF_PAGE_LINK_SCHEMA_VERSION = 5;
-const CHAPTER_NOTES_ANNOTATION_THRESHOLD = 100;
 const PDF_IMAGE_MAX_DIMENSION = 1600;
 const COVER_IMAGE_MAX_DIMENSION = 1200;
 
@@ -794,6 +801,11 @@ function readExistingPdfAnnotatedPages(markdown: string | null): number {
     return 0;
   }
 
+  const frontmatterAnnotatedPages = readBookAnnotatedPages(markdown);
+  if (frontmatterAnnotatedPages !== null) {
+    return frontmatterAnnotatedPages;
+  }
+
   const matches = markdown.match(/<a href="[^"]*">第 \d+ 页<\/a>/g);
   return matches?.length ?? 0;
 }
@@ -1116,6 +1128,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
 
   let annotationsByAssetId = new Map<string, EpubAnnotation[]>();
   const chapterTitleByKeyByAssetId = new Map<string, Map<string, string>>();
+  const chapterTitlePathByKeyByAssetId = new Map<string, Map<string, string[]>>();
   const chapterOrderByKeyByAssetId = new Map<string, Map<string, number>>();
   if (changedEpubAssetIds.size > 0) {
     const sortedEpubAnnotations = sortEpubAnnotations(readEpubAnnotations(paths.annotationDbPath, paths.libraryDbPath));
@@ -1124,11 +1137,13 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
       changedSnapshots
         .filter((snapshot) => snapshot.book.format === "EPUB")
         .map(async (snapshot) => {
-          const [chapterTitleByKey, chapterOrderByKey] = await Promise.all([
+          const [chapterTitleByKey, chapterTitlePathByKey, chapterOrderByKey] = await Promise.all([
             readEpubChapterTitleByKey(snapshot.book.path),
+            readEpubChapterTitlePathByKey(snapshot.book.path),
             readEpubChapterOrderByKey(snapshot.book.path),
           ]);
           chapterTitleByKeyByAssetId.set(snapshot.book.assetId, chapterTitleByKey);
+          chapterTitlePathByKeyByAssetId.set(snapshot.book.assetId, chapterTitlePathByKey);
           chapterOrderByKeyByAssetId.set(snapshot.book.assetId, chapterOrderByKey);
         }),
     );
@@ -1201,6 +1216,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
         let nextCoverImageRelativePath: string | null = snapshot.coverImageRelativePath;
         let epubNotes: EpubAnnotation[] = [];
         let epubChapterTitleByKey: Map<string, string> | undefined;
+        let epubChapterTitlePathByKey: Map<string, string[]> | undefined;
         let epubChapterOrderByKey: Map<string, number> | undefined;
         let pdfPages: PdfPageRenderItem[] = [];
         let pdfOutlineLeaves: PdfOutlineLeaf[] = [];
@@ -1211,6 +1227,7 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
         if (snapshot.book.format === "EPUB") {
           epubNotes = annotationsByAssetId.get(snapshot.book.assetId) ?? [];
           epubChapterTitleByKey = chapterTitleByKeyByAssetId.get(snapshot.book.assetId);
+          epubChapterTitlePathByKey = chapterTitlePathByKeyByAssetId.get(snapshot.book.assetId);
           epubChapterOrderByKey = chapterOrderByKeyByAssetId.get(snapshot.book.assetId);
           if (epubNotes.length === 0) {
             nextBookFileRelativePath = canPreservePreviousOutput
@@ -1269,7 +1286,12 @@ export async function runSync(config: SyncConfig, paths: IBooksPaths, options: S
         if (nextBookFileRelativePath) {
           const coverImagePropertyValue = toObsidianWikilink(config.managedDirName, nextCoverImageRelativePath);
           if (snapshot.book.format === "EPUB") {
-            const chapters = buildEpubRenderedChapters(epubNotes, epubChapterTitleByKey, epubChapterOrderByKey);
+            const chapters = buildEpubRenderedChapters(
+              epubNotes,
+              epubChapterTitleByKey,
+              epubChapterOrderByKey,
+              epubChapterTitlePathByKey,
+            );
             effectiveChapterNotes = previousAssetState
               ? snapshot.chapterNotes
               : shouldDefaultChapterNotes(epubNotes.length, hasUsableEpubChapterStructure(epubChapterTitleByKey));
