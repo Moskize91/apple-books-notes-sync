@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>apple-books-notes-sync</h1>
+  <h1>Apple Books Notes Sync</h1>
   <p><a href="./README.md">English</a> | 中文</p>
   <p>
     <a href="https://www.npmjs.com/package/apple-books-notes-sync"><img alt="npm version" src="https://img.shields.io/npm/v/apple-books-notes-sync"></a>
@@ -8,133 +8,109 @@
   </p>
 </div>
 
-将 Apple Books 的高亮和笔记同步为 Obsidian vault 中的 Markdown 文件。
+Apple Books Notes Sync 是一个 Obsidian 桌面插件，用于把 Apple Books 的高亮、笔记和 PDF 标注同步为本地 Markdown 笔记。
 
-本项目包含两部分：
-
-- Obsidian 桌面插件：负责 vault 级设置和应用内命令。
-- `absync` CLI companion：用于对已安装并启用插件的 vault 做自动化同步。
+插件通过 companion CLI `absync` 读取本机 Apple Books 数据，并在 Obsidian UI 进程之外执行同步任务。
 
 ## 环境要求
 
 - macOS
 - Obsidian 桌面版
-- 使用 CLI 时需要 Node.js `>=20.16.0`
 - Apple Books 已有本地书库数据
+- Node.js `>=20.16.0`
 - `sqlite3` 在 `PATH` 中可用
 - 可选 PDF 渲染器：`swift`、`mupdf-tools` 的 `mutool`，或 `poppler` 的 `pdftocairo`
 
 插件仅支持桌面端，不支持 Obsidian 移动端。
 
-## CLI 安装
+## 安装
+
+### Obsidian 插件
+
+当插件上架 Obsidian Community Plugins 后，可以这样安装：
+
+1. 打开 **Settings**。
+2. 进入 **Community plugins**。
+3. 搜索 `Apple Books Notes Sync`。
+4. 安装并启用插件。
+
+手动安装时，将 release 文件复制到：
+
+```text
+<vault>/.obsidian/plugins/apple-books-notes-sync/
+```
+
+插件目录应包含：
+
+- `main.js`
+- `manifest.json`
+- 如果 release 包含 `styles.css`，也一起复制
+
+然后重载 Obsidian，并在 **Community plugins** 中启用 Apple Books Notes Sync。
+
+### Companion CLI
+
+在终端安装 CLI companion：
 
 ```sh
 npm install -g apple-books-notes-sync
+```
+
+可用下面命令确认安装：
+
+```sh
 absync --help
 ```
 
-也可以不全局安装：
-
-```sh
-npx apple-books-notes-sync --help
-```
-
-CLI 不再保存全局配置。它会发现 Obsidian vault，并读取目标 vault 内 Apple Books Notes Sync 插件的设置。
-
 ## 首次使用
 
-先在目标 vault 中安装并启用 Obsidian 插件，然后在 Obsidian 插件设置页配置。默认受管理输出目录是：
+启用插件后：
+
+1. 打开 Obsidian 中 Apple Books Notes Sync 的插件设置。
+2. 在 **absync CLI path** 旁点击 **Detect**。
+3. 点击 **Test** 验证 CLI 可用。
+4. 从命令面板运行 **Doctor**、**Plan** 或 **Sync**。
+
+默认受管理输出目录是：
 
 ```text
 <vault>/Apple Books Notes
 ```
 
-写入前建议先检查环境并预览计划：
+如果还没配置 CLI path 就运行 Sync，插件会显示安装命令和路径检测命令。
 
-```sh
-absync vaults
-absync doctor
-absync books
-absync plan
-absync sync
-```
+## 使用
 
-如果存在多个 vault，可以指定 vault：
+Apple Books Notes Sync 添加这些 Obsidian 命令：
 
-```sh
-absync sync --vault "MyVault"
-absync sync --vault c957b104655c94aa
-absync sync --vault "/path/to/MyVault"
-```
+- `Apple Books Notes Sync: Sync`
+- `Apple Books Notes Sync: Plan`
+- `Apple Books Notes Sync: Doctor`
+- `Apple Books Notes Sync: Create Books.base`
 
-selector 解析顺序是：Obsidian vault ID、vault 名称、绝对路径。vault 名称重复时会报错，要求改用 ID 或路径。
+左侧 ribbon 图标会运行 Sync。
 
-## 命令
+`Create Books.base` 会在 `<managedDirName>/Books.base` 创建用于浏览同步书籍笔记的 Obsidian Bases 视图。已有 `.base` 文件默认不会被覆盖，Sync 也不会删除或重写 `.base` 文件。
 
-### `absync vaults`
+## 功能
 
-列出从 Obsidian 全局数据中发现的 vault。
+- 将 EPUB 高亮和笔记同步为 Markdown。
+- 同步 PDF 标注和渲染后的 PDF 页面图片。
+- 将标注较多且有目录结构的 EPUB/PDF 拆分为章节笔记。
+- 保留 `sync_paused`、`chapter_notes` 等可交互属性。
+- 创建 `Books.base` 视图用于浏览同步后的书籍笔记。
+- 将封面图片和 PDF 页面资源保存到受管理目录中。
+- 可直接使用 `absync` 做自动化。
 
-```sh
-absync vaults
-absync vaults --json
-```
+## 设置
 
-### `absync doctor`
+- **Managed folder [默认: Apple Books Notes]**：当前 vault 中写入生成笔记和资源的目录。
+- **Books Base**：创建用于浏览同步书籍笔记的 Obsidian Bases 视图。
+- **absync CLI path**：`absync` CLI 的完整路径。使用 **Detect** 自动查找并保存。
+- **PDF notes [默认: auto]**：控制是否同步 PDF 标注，以及使用哪个渲染器生成 PDF 页面图片。
+- **PDF page opener [默认: Microsoft Edge]**：从生成笔记打开 PDF 页面链接时使用的应用。
 
-检查本地环境和目标 vault 是否可以同步。
-
-```sh
-absync doctor
-absync doctor --vault "MyVault"
-```
-
-### `absync books`
-
-列出可同步的 Apple Books 条目。
-
-```sh
-absync books
-absync books --json
-```
-
-该命令只读取 Apple Books 本地数据，不需要目标 vault。可同步格式为 EPUB 和 PDF。
-
-### `absync plan`
-
-预览 `sync` 将执行的写入和删除，不修改文件。
-
-```sh
-absync plan
-absync plan --vault "MyVault"
-absync plan --book "Newton"
-absync plan --json
-```
-
-### `absync sync`
-
-写入变更后的 Markdown 文件和受管理 PDF 资源。
-
-```sh
-absync sync
-absync sync --vault "MyVault"
-absync sync --dry-run
-absync sync --book "Newton"
-```
-
-### `absync base create`
-
-创建用于浏览同步书籍笔记的 Obsidian Bases 视图。默认写入
-`<managedDirName>/Books.base`，且不会覆盖已有文件。
-
-```sh
-absync base create
-absync base create --vault "MyVault"
-absync base create --path "Apple Books Notes/Books.base"
-absync base create --overwrite
-```
-
-输出目录结构：
+## 输出
 
 ```text
 <vault>/<managedDirName>/
@@ -153,7 +129,46 @@ absync base create --overwrite
     lock
 ```
 
-## 开发
+## CLI
+
+CLI 主要用于自动化和排错。常用命令：
+
+```sh
+absync doctor
+absync plan
+absync sync
+absync base create
+```
+
+完整 CLI 文档见 [docs/user/CLI.zh-CN.md](docs/user/CLI.zh-CN.md)。
+
+## FAQ
+
+### 为什么插件需要 CLI？
+
+读取 Apple Books 数据库和渲染 PDF 资源可能耗时较长。插件通过子进程启动 `absync`，避免在 Obsidian UI 进程内执行同步任务，从而保持 Obsidian 响应。
+
+### Sync 会覆盖我的编辑吗？
+
+生成的书籍笔记包含受管理属性和生成正文。`sync_paused`、`chapter_notes` 等可交互属性会被保留。Sync 不会覆盖或删除 `.base` 文件。
+
+### 文件会写到哪里？
+
+默认写到 `<vault>/Apple Books Notes`。可以在插件设置中修改。
+
+### 可以不通过 Obsidian 直接使用 CLI 吗？
+
+CLI 需要一个已安装并启用本插件的目标 Obsidian vault，因为它会读取 vault 级插件设置。
+
+## 贡献者
+
+开发说明见 [docs/internal/ARCHITECTURE.md](docs/internal/ARCHITECTURE.md)。运行完整检查：
+
+```sh
+npm run check
+```
+
+## 发布
 
 构建 CLI 和插件产物：
 
@@ -161,10 +176,14 @@ absync base create --overwrite
 npm run build
 ```
 
-本地插件调试时，复制 `.env.template` 为 `.env.local`，填写 `OBSIDIAN_DEV_VAULT`，然后运行：
+Release 通过 GitHub Actions 创建：
 
-```sh
-npm run install:plugin
-```
+1. 更新 `manifest.json`、`package.json` 和 `versions.json`。
+2. 将版本变更合入 `main`。
+3. 在 GitHub Actions 中运行 **Release** workflow。
 
-插件发布 staging 目录是 `plugin-dist/`，其中包含 Obsidian GitHub Release 所需的 `main.js`、`manifest.json` 和可选 `styles.css`。
+该 workflow 会构建插件，创建 tag 与 `manifest.json.version` 一致的 GitHub release，并上传 Obsidian 需要的文件：
+
+- `main.js`
+- `manifest.json`
+- `styles.css`

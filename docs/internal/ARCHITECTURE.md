@@ -13,13 +13,13 @@
 - `src/plugin/main.ts` 是 Obsidian plugin 入口，负责插件设置页、命令、左侧 ribbon 按钮、状态栏进度和 CLI 子进程调用。
 - `src/lib/` 放共享领域代码，包括 Apple Books 数据读取、同步计划、Markdown 渲染、PDF 处理、vault 发现、插件设置、同步状态和运行时配置。
 - `manifest.json` 和可选的 `styles.css` 是 plugin 发布输入。
-- `tools/render_pdf_page.swift` 会被复制到 plugin 发布暂存目录，作为 plugin 随包携带的 PDF 渲染辅助工具。
-- PDF 笔记的可信来源和同步规则见 `docs/PDF_NOTES.md`。
+- `tools/render_pdf_page.swift` 会被复制到 plugin 发布暂存目录，供本地开发和手动安装场景使用。Obsidian Community Plugins 的 GitHub release assets 只上传 `main.js`、`manifest.json`、`styles.css`。
+- PDF 笔记的可信来源和同步规则见 `docs/internal/PDF_NOTES.md`。
 
 ## 构建产物
 
 - CLI 构建到 `lib/cli.js`；`package.json` 把它暴露为 `absync` binary。
-- Plugin 构建到 `plugin-dist/main.js`；`npm run prepare:plugin` 还会暂存 `manifest.json`、可选的 `styles.css` 和 plugin 工具文件。
+- Plugin 构建到 `plugin-dist/main.js`；`npm run prepare:plugin` 还会暂存 `manifest.json`、可选的 `styles.css` 和本地/手动安装用的 plugin 工具文件。
 - `lib/` 和 `plugin-dist/` 是构建产物，不是源码维护入口。
 
 同时更新两个发布面时，使用：
