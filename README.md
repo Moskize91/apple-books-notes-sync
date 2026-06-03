@@ -45,7 +45,6 @@ The plugin folder should contain:
 - `main.js`
 - `manifest.json`
 - `styles.css` if included in the release
-- `tools/` if included in the release
 
 Then reload Obsidian and enable Apple Books Notes Sync from **Community plugins**.
 
@@ -177,4 +176,14 @@ Build both release surfaces with:
 npm run build
 ```
 
-The plugin release staging directory is `plugin-dist/`. It contains the files Obsidian expects in a GitHub release, including `main.js`, `manifest.json`, optional `styles.css`, and bundled helper tools.
+Releases are created from GitHub Actions:
+
+1. Update `manifest.json`, `package.json`, and `versions.json`.
+2. Merge the version change into `main`.
+3. Run the **Release** workflow from the GitHub Actions tab.
+
+The workflow builds the plugin, creates a GitHub release whose tag matches `manifest.json.version`, and uploads the files Obsidian expects:
+
+- `main.js`
+- `manifest.json`
+- `styles.css`
