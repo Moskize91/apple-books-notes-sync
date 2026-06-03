@@ -19,7 +19,8 @@
 
 # AI 路由表
 
-- `docs/ARCHITECTURE.md`: 涉及项目整体结构、CLI 与 Obsidian plugin 的关系、构建产物或运行边界时，阅读此文。
-- `docs/PDF_NOTES.md`: 涉及 PDF 笔记、PDF annotation、PDF 文件变化检测、或 PDF 与 Apple Books 数据库关系时，阅读此文。
-- `docs/PULL_REQUEST_WORKFLOW.md`: 进行 Git 操作或 GitHub 相关操作，如提交代码、推分支、提 PR、检查 PR 状态前阅读此文。
-- `README.md` 和 `README.zh-CN.md`: 涉及用户安装、CLI 命令、首次运行、开发构建入口或英文公开说明时，阅读此文。
+- `docs/internal/ARCHITECTURE.md`: 涉及项目整体结构、CLI 与 Obsidian plugin 的关系、构建产物或运行边界时，阅读此文。
+- `docs/internal/PDF_NOTES.md`: 涉及 PDF 笔记、PDF annotation、PDF 文件变化检测、或 PDF 与 Apple Books 数据库关系时，阅读此文。
+- `docs/internal/PULL_REQUEST_WORKFLOW.md`: 进行 Git 操作或 GitHub 相关操作，如提交代码、推分支、提 PR、检查 PR 状态前阅读此文。
+- `README.md` 和 `README.zh-CN.md`: 涉及用户安装、首次运行、开发构建入口或英文公开说明时，阅读此文。
+- `docs/user/CLI.md` 和 `docs/user/CLI.zh-CN.md`: 涉及 CLI 命令、CLI 安装、自动化用法或 CLI 输出结构时，阅读此文。

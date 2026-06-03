@@ -14,7 +14,7 @@
 - `src/lib/` 放共享领域代码，包括 Apple Books 数据读取、同步计划、Markdown 渲染、PDF 处理、vault 发现、插件设置、同步状态和运行时配置。
 - `manifest.json` 和可选的 `styles.css` 是 plugin 发布输入。
 - `tools/render_pdf_page.swift` 会被复制到 plugin 发布暂存目录，作为 plugin 随包携带的 PDF 渲染辅助工具。
-- PDF 笔记的可信来源和同步规则见 `docs/PDF_NOTES.md`。
+- PDF 笔记的可信来源和同步规则见 `docs/internal/PDF_NOTES.md`。
 
 ## 构建产物
 

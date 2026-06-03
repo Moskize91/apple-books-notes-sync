@@ -141,7 +141,7 @@ absync sync
 absync base create
 ```
 
-See [docs/CLI.md](docs/CLI.md) for the full CLI reference.
+See [docs/user/CLI.md](docs/user/CLI.md) for the full CLI reference.
 
 ## FAQ
 
@@ -163,7 +163,7 @@ The CLI expects a target Obsidian vault with this plugin installed and enabled, 
 
 ## For Contributors
 
-Developer notes live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Run the project checks with:
+Developer notes live in [docs/internal/ARCHITECTURE.md](docs/internal/ARCHITECTURE.md). Run the project checks with:
 
 ```sh
 npm run check
